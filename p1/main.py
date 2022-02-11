@@ -26,7 +26,7 @@ _MU_0: Final[float] = _E / (2 * (1 + _NU))
 _LAMBDA_0: Final[float] = _E * _NU / ((1 + _NU) * (1 - 2 * _NU))
 _GRAVITY = -100.0
 _MODEL = "jelly"
-_STEPS: Final[int] = 5000
+_STEPS: Final[int] = 3000
 
 
 def generate_cube_points(r: Tuple[float, float], res: int = 10) -> np.ndarray:
@@ -108,7 +108,9 @@ def sim(save: bool, outdir: str, use_gui=False):
     Cv.append(C.copy())
     Jpv.append(Jp.copy())
 
-    for _ in tqdm(range(_STEPS)):
+    pb = tqdm(range(_STEPS))
+    for _ in pb:
+        pb.set_postfix({"model": _MODEL})
         gv = np.zeros(((_RES + 1), (_RES + 1), 2))
         gm = np.zeros(((_RES + 1), (_RES + 1), 1))
         advance(gv, gm, x, v, F, C, Jp)
@@ -122,8 +124,7 @@ def sim(save: bool, outdir: str, use_gui=False):
         gmv.append(gm.copy())
 
     if save:
-        logger.info("Saving")
-        for i in tqdm(range(_STEPS)):
+        for i in range(_STEPS):
             fname = f"{outdir}/{i}/"
             os.mkdir(fname)
             np.save(f"{fname}x.npy", xv[i])
@@ -133,7 +134,6 @@ def sim(save: bool, outdir: str, use_gui=False):
             np.save(f"{fname}Jp.npy", Jpv[i])
             np.save(f"{fname}gv.npy", gvv[i])
             np.save(f"{fname}gm.npy", gmv[i])
-        logger.success("Saving Complete")
 
     if use_gui:
         while gui.running and not gui.get_event(gui.ESCAPE):
@@ -152,15 +152,16 @@ def sim(save: bool, outdir: str, use_gui=False):
 if __name__ == "__main__":
     gravities = [-9.8, -25, -50, -100, -200, -500]
     models = [("jelly", "snow", "liquid") * len(gravities)]
-    outdirs = [f"tmp_{i}" for i in range(len(gravities))]
 
-    pb = tqdm(zip(gravities, models, outdirs))
-    for gravity, models, outdir in pb:
+    it = 0
+    for gravity, models in tqdm(zip(gravities, models)):
         _GRAVITY = gravity
         for model in models:
-            pb.set_postfix({"model": model})
             try:
+                outdir = f"{model}_{it}"
                 _MODEL = model
                 sim(True, outdir)
             except Exception as e:
                 logger.error("This sim went wrong, skipping")
+
+            it += 1
