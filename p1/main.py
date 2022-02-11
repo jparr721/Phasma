@@ -1,5 +1,5 @@
 import os
-from typing import Final, List
+from typing import Final
 
 import numba as nb
 import taichi as ti
@@ -24,9 +24,9 @@ _E: Final[float] = 1e4
 _NU: Final[float] = 0.2
 _MU_0: Final[float] = _E / (2 * (1 + _NU))
 _LAMBDA_0: Final[float] = _E * _NU / ((1 + _NU) * (1 - 2 * _NU))
-_GRAVITY: Final[float] = -100.0
+_GRAVITY = -100.0
 _MODEL = "jelly"
-_STEPS: Final[int] = 2000
+_STEPS: Final[int] = 10000
 
 
 def generate_cube_points(r: Tuple[float, float], res: int = 10) -> np.ndarray:
@@ -71,19 +71,18 @@ def advance(
     g2p(_INV_DX, _DT, gv, x, v, F, C, Jp, _MODEL)
 
 
-@app.command()
-def sim(save: bool = typer.Option(False)):
+def sim(save: bool, outdir: str, use_gui=False):
     gui = ti.GUI()
     # cp = generate_cube_points((0.4, 0.6), _SHAPE_RES)
     # cp[:, 1] -= 0.35
     # x = np.concatenate((generate_cube_points((0.4, 0.6), _SHAPE_RES), cp))
     x = generate_cube_points((0.4, 0.6), _SHAPE_RES)
 
-    if not os.path.exists("tmp"):
-        os.mkdir("tmp")
+    if not os.path.exists(outdir):
+        os.mkdir(outdir)
     else:
         if save:
-            logger.error("tmp dir exists, remove it before saving")
+            logger.error(f"{outdir} dir exists, remove it before saving")
             exit(1)
 
     xv = []
@@ -125,7 +124,7 @@ def sim(save: bool = typer.Option(False)):
     if save:
         logger.info("Saving")
         for i in tqdm(range(_STEPS)):
-            fname = f"tmp/{i}/"
+            fname = f"{outdir}/{i}/"
             os.mkdir(fname)
             np.save(f"{fname}x.npy", xv[i])
             np.save(f"{fname}v.npy", vv[i])
@@ -136,15 +135,32 @@ def sim(save: bool = typer.Option(False)):
             np.save(f"{fname}gm.npy", gmv[i])
         logger.success("Saving Complete")
 
-    while gui.running and not gui.get_event(gui.ESCAPE):
-        for xx in xv:
-            gui.clear(0x112F41)
-            gui.rect(
-                np.array((0.04, 0.04)), np.array((0.96, 0.96)), radius=2, color=0x4FB99F
-            )
-            gui.circles(xx, radius=1.5, color=0xED553B)
-            gui.show()
+    if use_gui:
+        while gui.running and not gui.get_event(gui.ESCAPE):
+            for xx in xv:
+                gui.clear(0x112F41)
+                gui.rect(
+                    np.array((0.04, 0.04)),
+                    np.array((0.96, 0.96)),
+                    radius=2,
+                    color=0x4FB99F,
+                )
+                gui.circles(xx, radius=1.5, color=0xED553B)
+                gui.show()
 
 
 if __name__ == "__main__":
-    app()
+    gravities = [-9.8, -25, -50, -100, -200, -500]
+    models = [("jelly", "snow", "liquid") * len(gravities)]
+    outdirs = [f"tmp_{i}" for i in range(len(gravities))]
+
+    pb = tqdm(zip(gravities, models, outdirs))
+    for gravity, models, outdir in pb:
+        _GRAVITY = gravity
+        for model in models:
+            pb.set_postfix({"model": model})
+            try:
+                _MODEL = model
+                sim(True, outdir)
+            except Exception as e:
+                logger.error("This sim went wrong, skipping")
