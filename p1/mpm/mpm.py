@@ -28,7 +28,7 @@ def p2g(
     Jp: np.ndarray,
     model: str = "jelly",
 ):
-    for p in range(len(x)):
+    for p in nb.prange(len(x)):
         bc = (x[p] * inv_dx - 0.5).astype(np.int64)
         if oob(bc, gv.shape[0]):
             raise RuntimeError
@@ -70,7 +70,7 @@ def g2p(
     Jp: np.ndarray,
     model: str = "jelly",
 ):
-    for p in range(len(x)):
+    for p in nb.prange(len(x)):
         base_coord = (x[p] * inv_dx - 0.5).astype(np.int64)
         if oob(base_coord, gv.shape[0]):
             raise RuntimeError
