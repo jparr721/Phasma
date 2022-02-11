@@ -11,8 +11,6 @@ from mpm.mpm import *
 
 app = typer.Typer(help="p1")
 
-ti.init(arch=ti.gpu)
-
 _SHAPE_RES: Final[int] = 50
 _RES: Final[int] = 64
 _DT: Final[float] = 1e-4
@@ -136,6 +134,7 @@ def sim(save: bool, outdir: str, use_gui=False):
             np.save(f"{fname}gm.npy", gmv[i])
 
     if use_gui:
+        ti.init(arch=ti.gpu)
         while gui.running and not gui.get_event(gui.ESCAPE):
             for xx in xv:
                 gui.clear(0x112F41)
