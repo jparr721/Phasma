@@ -25,6 +25,7 @@ keras==2.8.0
 Keras-Preprocessing==1.1.2
 libclang==13.0.0
 llvmlite==0.38.0
+loguru==0.6.0
 Markdown==3.3.6
 mccabe==0.6.1
 msgpack==1.0.3

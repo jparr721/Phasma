@@ -1,8 +1,10 @@
 import os
-from typing import Final
+from typing import Final, List
 
+import numba as nb
 import taichi as ti
 import typer
+from loguru import logger
 from tqdm import tqdm
 
 from mpm.mpm import *
@@ -23,7 +25,8 @@ _NU: Final[float] = 0.2
 _MU_0: Final[float] = _E / (2 * (1 + _NU))
 _LAMBDA_0: Final[float] = _E * _NU / ((1 + _NU) * (1 - 2 * _NU))
 _GRAVITY: Final[float] = -100.0
-_MODEL = "snow"
+_MODEL = "jelly"
+_STEPS: Final[int] = 2000
 
 
 def generate_cube_points(r: Tuple[float, float], res: int = 10) -> np.ndarray:
@@ -37,6 +40,7 @@ def generate_cube_points(r: Tuple[float, float], res: int = 10) -> np.ndarray:
     return np.array(all_pts, dtype=np.float64)
 
 
+@nb.njit
 def advance(
     gv: np.ndarray,
     gm: np.ndarray,
@@ -70,9 +74,26 @@ def advance(
 @app.command()
 def sim(save: bool = typer.Option(False)):
     gui = ti.GUI()
-    cp = generate_cube_points((0.4, 0.6), _SHAPE_RES)
-    cp[:, 1] -= 0.35
-    x = np.concatenate((generate_cube_points((0.4, 0.6), _SHAPE_RES), cp))
+    # cp = generate_cube_points((0.4, 0.6), _SHAPE_RES)
+    # cp[:, 1] -= 0.35
+    # x = np.concatenate((generate_cube_points((0.4, 0.6), _SHAPE_RES), cp))
+    x = generate_cube_points((0.4, 0.6), _SHAPE_RES)
+
+    if not os.path.exists("tmp"):
+        os.mkdir("tmp")
+    else:
+        if save:
+            logger.error("tmp dir exists, remove it before saving")
+            exit(1)
+
+    xv = []
+    vv = []
+    Fv = []
+    Cv = []
+    Jpv = []
+    gvv = []
+    gmv = []
+
     n = len(x)
     dim: Final[int] = 2
 
@@ -81,33 +102,42 @@ def sim(save: bool = typer.Option(False)):
     C = np.zeros((n, dim, dim), dtype=np.float64)
     Jp = np.ones((n, 1), dtype=np.float64)
 
-    if not os.path.exists("tmp"):
-        os.mkdir("tmp")
+    # Load Initial States
+    xv.append(x.copy())
+    vv.append(v.copy())
+    Fv.append(F.copy())
+    Cv.append(C.copy())
+    Jpv.append(Jp.copy())
 
-    p = [x.copy()]
-    for i in tqdm(range(2000)):
-        fname = f"tmp/{i}/"
-        os.mkdir(fname)
-
-        if save:
-            np.save(f"{fname}x.npy", x)
-            np.save(f"{fname}v.npy", v)
-            np.save(f"{fname}F.npy", F)
-            np.save(f"{fname}C.npy", C)
-            np.save(f"{fname}Jp.npy", Jp)
-
+    for _ in tqdm(range(_STEPS)):
         gv = np.zeros(((_RES + 1), (_RES + 1), 2))
         gm = np.zeros(((_RES + 1), (_RES + 1), 1))
         advance(gv, gm, x, v, F, C, Jp)
 
-        if save:
-            np.save(f"{fname}gv.npy", gv)
-            np.save(f"{fname}gm.npy", gm)
+        xv.append(x.copy())
+        vv.append(v.copy())
+        Fv.append(F.copy())
+        Cv.append(C.copy())
+        Jpv.append(Jp.copy())
+        gvv.append(gv.copy())
+        gmv.append(gm.copy())
 
-        p.append(x.copy())
+    if save:
+        logger.info("Saving")
+        for i in tqdm(range(_STEPS)):
+            fname = f"tmp/{i}/"
+            os.mkdir(fname)
+            np.save(f"{fname}x.npy", xv[i])
+            np.save(f"{fname}v.npy", vv[i])
+            np.save(f"{fname}F.npy", Fv[i])
+            np.save(f"{fname}C.npy", Cv[i])
+            np.save(f"{fname}Jp.npy", Jpv[i])
+            np.save(f"{fname}gv.npy", gvv[i])
+            np.save(f"{fname}gm.npy", gmv[i])
+        logger.success("Saving Complete")
 
     while gui.running and not gui.get_event(gui.ESCAPE):
-        for xx in p:
+        for xx in xv:
             gui.clear(0x112F41)
             gui.rect(
                 np.array((0.04, 0.04)), np.array((0.96, 0.96)), radius=2, color=0x4FB99F
