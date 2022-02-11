@@ -26,7 +26,7 @@ _MU_0: Final[float] = _E / (2 * (1 + _NU))
 _LAMBDA_0: Final[float] = _E * _NU / ((1 + _NU) * (1 - 2 * _NU))
 _GRAVITY = -100.0
 _MODEL = "jelly"
-_STEPS: Final[int] = 10000
+_STEPS: Final[int] = 5000
 
 
 def generate_cube_points(r: Tuple[float, float], res: int = 10) -> np.ndarray:
