@@ -3,6 +3,7 @@ import re
 from collections import defaultdict
 
 import numpy as np
+from tqdm import tqdm
 
 
 def sort_paths(folder: str):
@@ -18,22 +19,19 @@ def load_datasets(datasets_path: str):
         os.path.join(datasets_path, folder) for folder in os.listdir(datasets_path)
     ]
 
-    sorted_folders = defaultdict(list)
-    for folder in folders:
-        sorted_folders[os.path.basename(folder)] = sort_paths(folder)
-        sorted_folders[os.path.basename(folder)] = [
-            os.path.join(folder, subfolder)
-            for subfolder in sorted_folders[os.path.basename(folder)]
-        ]
-
-    for i, folder_name in enumerate(sorted_folders.keys()):
-        paths = sorted_folders[folder_name]
+    root = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "datasets")
+    sorted_folders = {os.path.basename(folder): sort_paths(folder) for folder in folders}
+    for folder, paths in tqdm(sorted_folders.items()):
         for path in paths:
-            if os.path.basename(path).lower() == "gm.npy":
-                loaded_datasets[folder_name][i] = np.load(path)
-            if os.path.basename(path).lower() == "gv.npy":
-                loaded_datasets[folder_name][i] = np.load(path)
-            if os.path.basename(path).lower() == "x.npy":
-                loaded_datasets[folder_name][i] = np.load(path)
+            folder_path = os.path.join(root, folder, path)
+            files = list(
+                filter(
+                    lambda fn: fn == "gm.npy" or fn == "gv.npy" or fn == "x.npy",
+                    os.listdir(folder_path),
+                )
+            )
+            files = [os.path.join(folder_path, n) for n in files]
+            files = {os.path.basename(os.path.dirname(n)): np.load(n) for n in files}
+            loaded_datasets[folder] = files
 
     return loaded_datasets
