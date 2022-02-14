@@ -1,37 +1,60 @@
 import os
-import re
-from collections import defaultdict
+import pickle
+from collections import namedtuple
+from dataclasses import dataclass
+from typing import Dict, List
 
 import numpy as np
+from loguru import logger
 from tqdm import tqdm
 
-
-def sort_paths(folder: str):
-    return sorted(
-        list(os.listdir(folder)),
-        key=lambda s: [int(t) if t.isdigit() else t for t in re.split("(\\d+)", s)],
-    )
+Group = namedtuple("Group", ["x", "gm", "gv"])
 
 
-def load_datasets(datasets_path: str):
-    loaded_datasets = defaultdict(dict)
+@dataclass(frozen=True)
+class InputOutputGroup(object):
+    x: np.ndarray
+    F: np.ndarray
+    gm: np.ndarray
+    gv: np.ndarray
+
+
+def load_model_result(timestep_folder_path: str):
+    files = list(os.listdir(timestep_folder_path))
+    gm = np.load(os.path.join(timestep_folder_path, files[files.index("gm.npy")]))
+    gv = np.load(os.path.join(timestep_folder_path, files[files.index("gv.npy")]))
+    x = np.load(os.path.join(timestep_folder_path, files[files.index("x.npy")]))
+    F = np.load(os.path.join(timestep_folder_path, files[files.index("F.npy")]))
+    return InputOutputGroup(x, F, gm, gv)
+
+
+def load_model_results(folder_path: str) -> List[InputOutputGroup]:
+    timesteps = list(os.listdir(folder_path))
+    groups_at_timestep: List[InputOutputGroup] = [
+        InputOutputGroup(np.zeros([]), np.zeros([]), np.zeros([]), np.zeros([]))
+    ] * len(timesteps)
+    for timestep in tqdm(timesteps):
+        fullpath = os.path.join(folder_path, timestep)
+        try:
+            groups_at_timestep[int(timestep)] = load_model_result(fullpath)
+        except Exception:
+            logger.error(f"Folder name {timestep} is malformed")
+
+    return groups_at_timestep
+
+
+def load_datasets(model: str, datasets_path: str) -> Dict[str, List[InputOutputGroup]]:
     folders = [
         os.path.join(datasets_path, folder) for folder in os.listdir(datasets_path)
     ]
 
-    root = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "datasets")
-    sorted_folders = {os.path.basename(folder): sort_paths(folder) for folder in folders}
-    for folder, paths in tqdm(sorted_folders.items()):
-        for path in paths:
-            folder_path = os.path.join(root, folder, path)
-            files = list(
-                filter(
-                    lambda fn: fn == "gm.npy" or fn == "gv.npy" or fn == "x.npy",
-                    os.listdir(folder_path),
-                )
-            )
-            files = [os.path.join(folder_path, n) for n in files]
-            files = {os.path.basename(os.path.dirname(n)): np.load(n) for n in files}
-            loaded_datasets[folder] = files
+    folders = list(filter(lambda x: model in x, folders))
 
-    return loaded_datasets
+    datasets = {
+        os.path.basename(folder): load_model_results(folder) for folder in tqdm(folders)
+    }
+
+    with open("loaded.pkl", "wb+") as pf:
+        pickle.dump(datasets, pf)
+
+    return datasets
