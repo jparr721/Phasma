@@ -164,22 +164,10 @@ def grid_op(
 
 def nn_grid_op(
     model: Model,
-    res: int,
-    dx: float,
-    dt: float,
-    gravity: float,
     gv: np.ndarray,
     gm: np.ndarray,
 ):
-    cgv = gv.copy()
-    cgm = gm.copy()
-    grid_op(res, dx, dt, gravity, cgv, cgm)
-
     input_ = np.concatenate((gv[:64, :64, :], gm[:64, :64, :]), axis=2)
-    grid = model(input_.reshape(1, *input_.shape))
+    grid = model.predict(input_.reshape(1, *input_.shape))
     gv[:64, :64, :] = grid[0, :, :, :2]
     gm[:64, :64, 0] = grid[0, :, :, 2]
-    print(gm[gm.nonzero()])
-    print(gv[gv.nonzero()])
-    print(cgm[cgm.nonzero()])
-    print(cgv[cgv.nonzero()])

@@ -1,5 +1,6 @@
 import os
 import pickle
+import sys
 from dataclasses import dataclass
 from typing import Dict, Final, List
 
@@ -9,6 +10,8 @@ from loguru import logger
 from tensorflow.keras import Input, Model, Sequential
 from tensorflow.keras import layers as L
 from tensorflow.keras.callbacks import EarlyStopping
+from tensorflow.keras.optimizers import Adam
+from tensorflow.python.keras.saving.save import load_model
 from tqdm import tqdm
 
 _MODEL_OUTPUT_PATH = "cnn_model.h5"
@@ -61,19 +64,13 @@ def make_dataset(model: str) -> Dataset:
 
     for data in tqdm(datasets.values()):
         for row in data:
-            igmigv = np.concatenate((row.igm, row.igv), axis=2)
-            assert igmigv.shape == (*row.igm.shape[:2], 3), f"{igmigv.shape}"
-            x.append(igmigv)
-
-            gmgv = np.concatenate((row.gm, row.gv), axis=2)
-            assert gmgv.shape == (*row.gm.shape[:2], 3), f"{gmgv.shape}"
-            y.append(gmgv)
+            x.append(row.ig)
+            y.append(row.g)
 
     return Dataset(np.array(x), np.array(y))
 
 
-def make_model(input_shape):
-    # inputs = Input(shape=input_shape)
+def make_model():
     inputs = Input(shape=(64, 64, 3))
 
     def conv_block(name, in_c, size=4, pad="same", t=False, act="relu", bn=True):
@@ -122,33 +119,26 @@ def make_model(input_shape):
     return Model(inputs=inputs, outputs=x)
 
 
-def train_model():
-    dataset = make_dataset("jelly")
+def train_model(model, sim):
+    dataset = make_dataset(sim)
 
     logger.success("Dataset loaded")
 
     x = dataset.x
     y = dataset.y
 
-    # Remove this later
-    x = x[:, :64, :64, :]
-    y = y[:, :64, :64, :]
-
     logger.info(f"x.shape {x.shape}")
     logger.info(f"y.shape {y.shape}")
 
-    model = make_model(x.shape[1:])
-    model.compile(optimizer="adam", loss="mse")
-    logger.info(model.summary())
     try:
         model.fit(
             x,
             y,
             epochs=50,
-            batch_size=8,
+            batch_size=128,
             validation_split=0.3,
             callbacks=[
-                EarlyStopping(monitor="loss", patience=20, restore_best_weights=True)
+                EarlyStopping(monitor="loss", patience=5, restore_best_weights=True)
             ],
         )
     except Exception:
@@ -169,4 +159,18 @@ def save_model(model):
 
 
 if __name__ == "__main__":
-    save_model(train_model())
+    sim = sys.argv[1]
+    logger.info(f"Running {sim}")
+
+    if sim == "jelly":
+        model = make_model()
+        model.compile(optimizer=Adam(0.0002, beta_1=0.5), loss="mse")
+        logger.info(model.summary())
+    else:
+        dirname = os.path.join(os.path.dirname(os.path.abspath(__file__)), "saved_models")
+        if not os.path.exists(dirname):
+            os.mkdir(dirname)
+
+        model = load_model(f"{dirname}/{_MODEL_OUTPUT_PATH}")
+
+    save_model(train_model(model, sim))

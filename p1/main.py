@@ -23,9 +23,9 @@ _E: Final[float] = 1e3
 _NU: Final[float] = 0.2
 _MU_0: Final[float] = _E / (2 * (1 + _NU))
 _LAMBDA_0: Final[float] = _E * _NU / ((1 + _NU) * (1 - 2 * _NU))
-_GRAVITY = -200.0
+_GRAVITY = -100.0
 _MODEL = "jelly"
-_STEPS: Final[int] = 2000
+_STEPS: Final[int] = 150
 
 dirname = os.path.join(os.path.dirname(os.path.abspath(__file__)), "nn", "saved_models")
 _ML_MODEL: Final[Model] = load_model(os.path.join(dirname, "cnn_model.h5"))
@@ -52,8 +52,8 @@ def advance(
     F: np.ndarray,
     C: np.ndarray,
     Jp: np.ndarray,
-    init_gv,
-    init_gm,
+    ig,
+    g,
 ):
     global _USE_ML
     p2g(
@@ -73,13 +73,14 @@ def advance(
         Jp,
         _MODEL,
     )
-    init_gv.append(gv)
-    init_gm.append(gm)
+
+    ig.append(np.concatenate((gv[:64, :64, :], gm[:64, :64, :]), axis=2))
 
     if _USE_ML:
-        nn_grid_op(_ML_MODEL, _RES, _DX, _DT, _GRAVITY, gv, gm)
+        nn_grid_op(_ML_MODEL, gv, gm)
     else:
         grid_op(_RES, _DX, _DT, _GRAVITY, gv, gm)
+    g.append(np.concatenate((gv[:64, :64, :], gm[:64, :64, :]), axis=2))
 
     g2p(_INV_DX, _DT, gv, x, v, F, C, Jp, _MODEL)
 
@@ -104,14 +105,8 @@ def offline_sim(
             exit(1)
 
     xv = []
-    vv = []
-    Fv = []
-    Cv = []
-    Jpv = []
-    igvv = []
-    igmv = []
-    gvv = []
-    gmv = []
+    ig = []
+    g = []
 
     n = len(x)
     dim: Final[int] = 2
@@ -123,10 +118,6 @@ def offline_sim(
 
     # Load Initial States
     xv.append(x.copy())
-    vv.append(v.copy())
-    Fv.append(F.copy())
-    Cv.append(C.copy())
-    Jpv.append(Jp.copy())
 
     pb = tqdm(range(_STEPS))
     try:
@@ -134,29 +125,16 @@ def offline_sim(
             pb.set_postfix({"model": _MODEL})
             gv = np.zeros(((_RES + 1), (_RES + 1), 2))
             gm = np.zeros(((_RES + 1), (_RES + 1), 1))
-            advance(gv, gm, x, v, F, C, Jp, igvv, igmv)
+            advance(gv, gm, x, v, F, C, Jp, ig, g)
 
             xv.append(x.copy())
-            vv.append(v.copy())
-            Fv.append(F.copy())
-            Cv.append(C.copy())
-            Jpv.append(Jp.copy())
-            gvv.append(gv.copy())
-            gmv.append(gm.copy())
 
         if save:
             for i in range(_STEPS):
                 fname = f"{outdir}/{i}/"
                 os.mkdir(fname)
-                np.save(f"{fname}x.npy", xv[i])
-                np.save(f"{fname}v.npy", vv[i])
-                np.save(f"{fname}F.npy", Fv[i])
-                np.save(f"{fname}C.npy", Cv[i])
-                np.save(f"{fname}Jp.npy", Jpv[i])
-                np.save(f"{fname}gv.npy", gvv[i])
-                np.save(f"{fname}gm.npy", gmv[i])
-                np.save(f"{fname}igv.npy", igvv[i])
-                np.save(f"{fname}igm.npy", igmv[i])
+                np.save(f"{fname}g.npy", g[i])
+                np.save(f"{fname}ig.npy", ig[i])
     except Exception as e:
         logger.error(f"Busted: {e}")
 
@@ -178,24 +156,20 @@ def offline_sim(
 @app.command()
 def gen_data():
     global _GRAVITY, _MODEL
-    gravities = [-25, -50, -100, -200, -500]
-    models = [("jelly", "snow", "liquid") * len(gravities)]
+    gravities = [-20, -30, -40, -50, -75, -100, -150, -200, -300, -500]
 
     if not os.path.exists("datasets"):
         os.mkdir("datasets")
 
-    it = 0
-    for gravity, models in tqdm(zip(gravities, models)):
-        _GRAVITY = gravity
-        for model in models:
+    for model in ("jelly", "liquid", "snow"):
+        for gravity in tqdm(gravities):
+            _GRAVITY = gravity
             try:
-                outdir = f"datasets/{model}_{it % len(gravities)}"
+                outdir = f"datasets/{model}_{gravity * -1}"
                 _MODEL = model
                 offline_sim(True, outdir, False)
             except Exception:
                 logger.error("This sim went wrong, skipping")
-
-            it += 1
 
 
 if __name__ == "__main__":

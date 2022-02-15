@@ -1,6 +1,5 @@
 import os
 import pickle
-from collections import namedtuple
 from dataclasses import dataclass
 from typing import Dict, List
 
@@ -8,37 +7,29 @@ import numpy as np
 from loguru import logger
 from tqdm import tqdm
 
-Group = namedtuple("Group", ["x", "gm", "gv"])
-
 
 @dataclass(frozen=True)
 class InputOutputGroup(object):
-    igm: np.ndarray
-    igv: np.ndarray
-    gm: np.ndarray
-    gv: np.ndarray
+    ig: np.ndarray
+    g: np.ndarray
 
 
 def load_model_result(timestep_folder_path: str):
     files = list(os.listdir(timestep_folder_path))
-    igm = np.load(os.path.join(timestep_folder_path, files[files.index("igm.npy")]))
-    igv = np.load(os.path.join(timestep_folder_path, files[files.index("igv.npy")]))
-    gm = np.load(os.path.join(timestep_folder_path, files[files.index("gm.npy")]))
-    gv = np.load(os.path.join(timestep_folder_path, files[files.index("gv.npy")]))
-    return InputOutputGroup(igm, igv, gm, gv)
+    ig = np.load(os.path.join(timestep_folder_path, files[files.index("ig.npy")]))
+    g = np.load(os.path.join(timestep_folder_path, files[files.index("g.npy")]))
+    return InputOutputGroup(ig, g)
 
 
 def load_model_results(folder_path: str) -> List[InputOutputGroup]:
     timesteps = list(os.listdir(folder_path))
-    groups_at_timestep: List[InputOutputGroup] = [
-        InputOutputGroup(np.zeros([]), np.zeros([]), np.zeros([]), np.zeros([]))
-    ] * len(timesteps)
+    groups_at_timestep = [InputOutputGroup(np.zeros([]), np.zeros([]))] * len(timesteps)
     for timestep in tqdm(timesteps):
         fullpath = os.path.join(folder_path, timestep)
         try:
             groups_at_timestep[int(timestep)] = load_model_result(fullpath)
-        except Exception:
-            logger.error(f"Folder name {timestep} is malformed")
+        except Exception as e:
+            logger.error(e)
 
     return groups_at_timestep
 
