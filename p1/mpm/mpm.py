@@ -32,6 +32,7 @@ def p2g(
     for p in nb.prange(len(x)):
         bc = (x[p] * inv_dx - 0.5).astype(np.int64)
         if oob(bc, gv.shape[0]):
+            print("p2g bc", bc)
             raise RuntimeError
         fx = (x[p] * inv_dx - bc).astype(np.float64)
 
@@ -50,6 +51,7 @@ def p2g(
         for i in range(3):
             for j in range(3):
                 if oob(bc, gv.shape[0], np.array((i, j))):
+                    print("p2g bc", bc)
                     raise RuntimeError
 
                 dpos = (np.array((i, j)) - fx) * dx
@@ -57,46 +59,6 @@ def p2g(
 
                 gv[bc[0] + i, bc[1] + j] += weight * (v[p] * mass + affine @ dpos)
                 gm[bc[0] + i, bc[1] + j] += weight * mass
-
-
-def nn_g2p(
-    gv: np.ndarray,
-    gm: np.ndarray,
-    x: np.ndarray,
-    F: np.ndarray,
-    Jp: np.ndarray,
-    ml_model: Model,
-    model: str = "jelly",
-):
-    gmgv = np.concatenate((gm, gv), axis=2)
-    gmgv = gmgv.reshape(1, *gmgv.shape)
-    x, F_ = ml_model.predict(gmgv)
-    print(x)
-    print(F_)
-    print(x.shape)
-    print(F_.shape)
-
-    for p in nb.prange(len(x)):
-        if model != "jelly":
-
-            if model == "snow":
-                U, sig, V = np.linalg.svd(F_)
-                sig = np.clip(sig, 1.0 - 2.5e-2, 1.0 + 7.5e-3)
-                sig = np.eye(2) * sig
-
-                old_J = np.linalg.det(F_)
-                F_ = U @ sig @ V.T
-                Jp[p] = np.clip(Jp[p] * old_J / np.linalg.det(F_), 0.6, 20.0)
-
-            if model == "liquid":
-                U, sig, V = np.linalg.svd(F_)
-                J = 1.0
-                for dd in range(2):
-                    J *= sig[dd]
-                F_ = np.eye(2)
-                F_[0, 0] = J
-
-        F[p] = F_
 
 
 @nb.njit
@@ -112,10 +74,11 @@ def g2p(
     model: str = "jelly",
 ):
     for p in nb.prange(len(x)):
-        base_coord = (x[p] * inv_dx - 0.5).astype(np.int64)
-        if oob(base_coord, gv.shape[0]):
+        bc = (x[p] * inv_dx - 0.5).astype(np.int64)
+        if oob(bc, gv.shape[0]):
+            print("g2p bc", bc)
             raise RuntimeError
-        fx = x[p] * inv_dx - (base_coord).astype(np.float64)
+        fx = x[p] * inv_dx - (bc).astype(np.float64)
 
         w = [0.5 * (1.5 - fx) ** 2, 0.75 - (fx - 1) ** 2, 0.5 * (fx - 0.5) ** 2]
 
@@ -124,10 +87,11 @@ def g2p(
 
         for i in range(3):
             for j in range(3):
-                if oob(base_coord, gv.shape[0], np.array((i, j))):
+                if oob(bc, gv.shape[0], np.array((i, j))):
+                    print("g2p bc", bc)
                     raise RuntimeError
                 dpos = np.array((i, j)) - fx
-                grid_v = gv[base_coord[0] + i, base_coord[1] + j]
+                grid_v = gv[bc[0] + i, bc[1] + j]
                 weight = w[i][0] * w[j][1]
                 v[p] += weight * grid_v
                 C[p] += 4 * inv_dx * np.outer(weight * grid_v, dpos)
@@ -196,3 +160,26 @@ def grid_op(
                 if I[d] >= (res + 1) - boundary and gv[i, j][d] > 0:
                     gv[i, j] = 0
                     gm[i, j] = 0
+
+
+def nn_grid_op(
+    model: Model,
+    res: int,
+    dx: float,
+    dt: float,
+    gravity: float,
+    gv: np.ndarray,
+    gm: np.ndarray,
+):
+    cgv = gv.copy()
+    cgm = gm.copy()
+    grid_op(res, dx, dt, gravity, cgv, cgm)
+
+    input_ = np.concatenate((gv[:64, :64, :], gm[:64, :64, :]), axis=2)
+    grid = model(input_.reshape(1, *input_.shape))
+    gv[:64, :64, :] = grid[0, :, :, :2]
+    gm[:64, :64, 0] = grid[0, :, :, 2]
+    print(gm[gm.nonzero()])
+    print(gv[gv.nonzero()])
+    print(cgm[cgm.nonzero()])
+    print(cgv[cgv.nonzero()])

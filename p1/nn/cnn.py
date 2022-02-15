@@ -6,7 +6,7 @@ from typing import Dict, Final, List
 import numpy as np
 from dataloader import InputOutputGroup, load_datasets
 from loguru import logger
-from tensorflow.keras import Input, Model
+from tensorflow.keras import Input, Model, Sequential
 from tensorflow.keras import layers as L
 from tensorflow.keras.callbacks import EarlyStopping
 from tqdm import tqdm
@@ -73,32 +73,53 @@ def make_dataset(model: str) -> Dataset:
 
 
 def make_model(input_shape):
-    inputs = Input(shape=input_shape)
+    # inputs = Input(shape=input_shape)
+    inputs = Input(shape=(64, 64, 3))
 
-    filters: Final[int] = 32
-    kernel_size: Final[int] = 5
+    def conv_block(name, in_c, size=4, pad="same", t=False, act="relu", bn=True):
+        block = Sequential(name=name)
 
-    def conv_block(x, f, ks):
-        x = L.Conv2D(filters=f, kernel_size=ks, padding="same")(x)
-        x = L.LeakyReLU()(x)
-        return x
+        if not t:
+            block.add(
+                L.Conv2D(
+                    in_c,
+                    kernel_size=size,
+                    strides=2,
+                    padding=pad,
+                    use_bias=True,
+                    activation=act,
+                )
+            )
+        else:
+            block.add(L.UpSampling2D(interpolation="bilinear"))
+            block.add(
+                L.Conv2DTranspose(
+                    filters=in_c,
+                    kernel_size=size - 1,
+                    padding=pad,
+                    activation=act,
+                )
+            )
 
-    # Conv block 1
-    block_1 = conv_block(inputs, filters, kernel_size)
+        if bn:
+            block.add(L.BatchNormalization())
+        return block
 
-    # Conv block 2
-    block_2 = conv_block(block_1, filters, 1)
+    channels = int(2**6 + 0.5)
+    e1 = conv_block("enc_1", 3, act="leaky_relu")(inputs)
+    e2 = conv_block("enc_2", channels, act="leaky_relu")(e1)
+    e3 = conv_block("enc_3", channels * 2, act="leaky_relu", size=2, pad="valid")(e2)
+    e4 = conv_block("enc_4", channels * 2, act="leaky_relu", size=2, pad="valid")(e3)
 
-    x = L.Conv2D(filters=filters, kernel_size=kernel_size, padding="same")(block_2)
+    x = conv_block("dec_4", channels * 2, t=True, size=2, pad="valid")(e4)
+    x = L.concatenate([x, e3])
+    x = conv_block("dec_3", channels * 2, t=True, size=2, pad="valid")(e3)
+    x = L.concatenate([x, e2])
+    x = conv_block("dec_2", channels, t=True)(x)
+    x = L.concatenate([x, e1])
+    x = conv_block("dec_1", 3, act=None, t=True, bn=False)(x)
 
-    # Skip block
-    skip_block_1 = L.add([block_1, x])
-
-    # Block 3
-    outputs = L.LeakyReLU()(skip_block_1)
-    outputs = L.BatchNormalization()(outputs)
-
-    return Model(inputs=inputs, outputs=outputs)
+    return Model(inputs=inputs, outputs=x)
 
 
 def train_model():
@@ -109,20 +130,30 @@ def train_model():
     x = dataset.x
     y = dataset.y
 
+    # Remove this later
+    x = x[:, :64, :64, :]
+    y = y[:, :64, :64, :]
+
     logger.info(f"x.shape {x.shape}")
     logger.info(f"y.shape {y.shape}")
 
     model = make_model(x.shape[1:])
     model.compile(optimizer="adam", loss="mse")
     logger.info(model.summary())
-    model.fit(
-        x,
-        y,
-        epochs=400,
-        batch_size=8,
-        validation_split=0.3,
-        callbacks=[EarlyStopping(monitor="loss", patience=20, restore_best_weights=True)],
-    )
+    try:
+        model.fit(
+            x,
+            y,
+            epochs=50,
+            batch_size=8,
+            validation_split=0.3,
+            callbacks=[
+                EarlyStopping(monitor="loss", patience=20, restore_best_weights=True)
+            ],
+        )
+    except Exception:
+        pass
+
     return model
 
 

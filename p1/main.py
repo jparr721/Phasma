@@ -23,14 +23,14 @@ _E: Final[float] = 1e3
 _NU: Final[float] = 0.2
 _MU_0: Final[float] = _E / (2 * (1 + _NU))
 _LAMBDA_0: Final[float] = _E * _NU / ((1 + _NU) * (1 - 2 * _NU))
-_GRAVITY = -50.0
+_GRAVITY = -200.0
 _MODEL = "jelly"
-_STEPS: Final[int] = 6000
+_STEPS: Final[int] = 2000
 
 dirname = os.path.join(os.path.dirname(os.path.abspath(__file__)), "nn", "saved_models")
-# _ML_MODEL: Final[Model] = load_model(os.path.join(dirname, "cnn_model.h5"))
-_ML_MODEL = None
-_USE_ML = False
+_ML_MODEL: Final[Model] = load_model(os.path.join(dirname, "cnn_model.h5"))
+# _ML_MODEL = None
+_USE_ML = True
 
 
 def generate_cube_points(r: Tuple[float, float], res: int = 10) -> np.ndarray:
@@ -75,11 +75,13 @@ def advance(
     )
     init_gv.append(gv)
     init_gm.append(gm)
-    grid_op(_RES, _DX, _DT, _GRAVITY, gv, gm)
-    if not _USE_ML:
-        g2p(_INV_DX, _DT, gv, x, v, F, C, Jp, _MODEL)
+
+    if _USE_ML:
+        nn_grid_op(_ML_MODEL, _RES, _DX, _DT, _GRAVITY, gv, gm)
     else:
-        nn_g2p(gv, gm, x, F, Jp, _ML_MODEL, _MODEL)
+        grid_op(_RES, _DX, _DT, _GRAVITY, gv, gm)
+
+    g2p(_INV_DX, _DT, gv, x, v, F, C, Jp, _MODEL)
 
 
 @app.command()
@@ -127,36 +129,39 @@ def offline_sim(
     Jpv.append(Jp.copy())
 
     pb = tqdm(range(_STEPS))
-    for _ in pb:
-        pb.set_postfix({"model": _MODEL})
-        gv = np.zeros(((_RES + 1), (_RES + 1), 2))
-        gm = np.zeros(((_RES + 1), (_RES + 1), 1))
-        advance(gv, gm, x, v, F, C, Jp, igvv, igmv)
+    try:
+        for _ in pb:
+            pb.set_postfix({"model": _MODEL})
+            gv = np.zeros(((_RES + 1), (_RES + 1), 2))
+            gm = np.zeros(((_RES + 1), (_RES + 1), 1))
+            advance(gv, gm, x, v, F, C, Jp, igvv, igmv)
 
-        xv.append(x.copy())
-        vv.append(v.copy())
-        Fv.append(F.copy())
-        Cv.append(C.copy())
-        Jpv.append(Jp.copy())
-        gvv.append(gv.copy())
-        gmv.append(gm.copy())
+            xv.append(x.copy())
+            vv.append(v.copy())
+            Fv.append(F.copy())
+            Cv.append(C.copy())
+            Jpv.append(Jp.copy())
+            gvv.append(gv.copy())
+            gmv.append(gm.copy())
 
-    if save:
-        for i in range(_STEPS):
-            fname = f"{outdir}/{i}/"
-            os.mkdir(fname)
-            np.save(f"{fname}x.npy", xv[i])
-            np.save(f"{fname}v.npy", vv[i])
-            np.save(f"{fname}F.npy", Fv[i])
-            np.save(f"{fname}C.npy", Cv[i])
-            np.save(f"{fname}Jp.npy", Jpv[i])
-            np.save(f"{fname}gv.npy", gvv[i])
-            np.save(f"{fname}gm.npy", gmv[i])
-            np.save(f"{fname}igv.npy", igvv[i])
-            np.save(f"{fname}igm.npy", igmv[i])
+        if save:
+            for i in range(_STEPS):
+                fname = f"{outdir}/{i}/"
+                os.mkdir(fname)
+                np.save(f"{fname}x.npy", xv[i])
+                np.save(f"{fname}v.npy", vv[i])
+                np.save(f"{fname}F.npy", Fv[i])
+                np.save(f"{fname}C.npy", Cv[i])
+                np.save(f"{fname}Jp.npy", Jpv[i])
+                np.save(f"{fname}gv.npy", gvv[i])
+                np.save(f"{fname}gm.npy", gmv[i])
+                np.save(f"{fname}igv.npy", igvv[i])
+                np.save(f"{fname}igm.npy", igmv[i])
+    except Exception as e:
+        logger.error(f"Busted: {e}")
 
     if use_gui:
-        ti.init(arch=ti.gpu)
+        ti.init(arch=ti.cpu)
         while gui.running and not gui.get_event(gui.ESCAPE):
             for i in range(0, len(xv), 10):
                 gui.clear(0x112F41)
