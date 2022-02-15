@@ -5,26 +5,32 @@ import numba as nb
 import taichi as ti
 import typer
 from loguru import logger
+from tensorflow.keras.models import Model, load_model
 from tqdm import tqdm
 
 from mpm.mpm import *
 
 app = typer.Typer(help="p1")
 
-_SHAPE_RES: Final[int] = 50
+_SHAPE_RES: Final[int] = 25
 _RES: Final[int] = 64
 _DT: Final[float] = 1e-4
 _DX: Final[float] = 1 / _RES
 _INV_DX: Final[float] = 1 / _DX
 _MASS: Final[float] = 1.0
 _VOL: Final[float] = 1.0
-_E: Final[float] = 1e4
+_E: Final[float] = 1e3
 _NU: Final[float] = 0.2
 _MU_0: Final[float] = _E / (2 * (1 + _NU))
 _LAMBDA_0: Final[float] = _E * _NU / ((1 + _NU) * (1 - 2 * _NU))
-_GRAVITY = -100.0
+_GRAVITY = -50.0
 _MODEL = "jelly"
-_STEPS: Final[int] = 3000
+_STEPS: Final[int] = 6000
+
+dirname = os.path.join(os.path.dirname(os.path.abspath(__file__)), "nn", "saved_models")
+# _ML_MODEL: Final[Model] = load_model(os.path.join(dirname, "cnn_model.h5"))
+_ML_MODEL = None
+_USE_ML = False
 
 
 def generate_cube_points(r: Tuple[float, float], res: int = 10) -> np.ndarray:
@@ -38,7 +44,6 @@ def generate_cube_points(r: Tuple[float, float], res: int = 10) -> np.ndarray:
     return np.array(all_pts, dtype=np.float64)
 
 
-@nb.njit
 def advance(
     gv: np.ndarray,
     gm: np.ndarray,
@@ -47,7 +52,10 @@ def advance(
     F: np.ndarray,
     C: np.ndarray,
     Jp: np.ndarray,
+    init_gv,
+    init_gm,
 ):
+    global _USE_ML
     p2g(
         _INV_DX,
         _MU_0,
@@ -65,16 +73,26 @@ def advance(
         Jp,
         _MODEL,
     )
+    init_gv.append(gv)
+    init_gm.append(gm)
     grid_op(_RES, _DX, _DT, _GRAVITY, gv, gm)
-    g2p(_INV_DX, _DT, gv, x, v, F, C, Jp, _MODEL)
+    if not _USE_ML:
+        g2p(_INV_DX, _DT, gv, x, v, F, C, Jp, _MODEL)
+    else:
+        nn_g2p(gv, gm, x, F, Jp, _ML_MODEL, _MODEL)
 
 
-def sim(save: bool, outdir: str, use_gui=False):
+@app.command()
+def offline_sim(
+    save: bool = typer.Option(False),
+    outdir: str = typer.Option("tmp"),
+    use_gui: bool = typer.Option(False),
+):
     gui = ti.GUI()
-    # cp = generate_cube_points((0.4, 0.6), _SHAPE_RES)
-    # cp[:, 1] -= 0.35
-    # x = np.concatenate((generate_cube_points((0.4, 0.6), _SHAPE_RES), cp))
-    x = generate_cube_points((0.4, 0.6), _SHAPE_RES)
+    bc = generate_cube_points((0.4, 0.6), _SHAPE_RES)
+    bc[:, 1] -= 0.35
+    tc = generate_cube_points((0.4, 0.6), _SHAPE_RES)
+    x = np.concatenate((tc, bc))
 
     if not os.path.exists(outdir):
         os.mkdir(outdir)
@@ -88,6 +106,8 @@ def sim(save: bool, outdir: str, use_gui=False):
     Fv = []
     Cv = []
     Jpv = []
+    igvv = []
+    igmv = []
     gvv = []
     gmv = []
 
@@ -111,7 +131,7 @@ def sim(save: bool, outdir: str, use_gui=False):
         pb.set_postfix({"model": _MODEL})
         gv = np.zeros(((_RES + 1), (_RES + 1), 2))
         gm = np.zeros(((_RES + 1), (_RES + 1), 1))
-        advance(gv, gm, x, v, F, C, Jp)
+        advance(gv, gm, x, v, F, C, Jp, igvv, igmv)
 
         xv.append(x.copy())
         vv.append(v.copy())
@@ -132,11 +152,13 @@ def sim(save: bool, outdir: str, use_gui=False):
             np.save(f"{fname}Jp.npy", Jpv[i])
             np.save(f"{fname}gv.npy", gvv[i])
             np.save(f"{fname}gm.npy", gmv[i])
+            np.save(f"{fname}igv.npy", igvv[i])
+            np.save(f"{fname}igm.npy", igmv[i])
 
     if use_gui:
         ti.init(arch=ti.gpu)
         while gui.running and not gui.get_event(gui.ESCAPE):
-            for xx in xv:
+            for i in range(0, len(xv), 10):
                 gui.clear(0x112F41)
                 gui.rect(
                     np.array((0.04, 0.04)),
@@ -144,23 +166,32 @@ def sim(save: bool, outdir: str, use_gui=False):
                     radius=2,
                     color=0x4FB99F,
                 )
-                gui.circles(xx, radius=1.5, color=0xED553B)
+                gui.circles(xv[i], radius=1.5, color=0xED553B)
                 gui.show()
 
 
-if __name__ == "__main__":
-    gravities = [-9.8, -25, -50, -100, -200, -500]
+@app.command()
+def gen_data():
+    global _GRAVITY, _MODEL
+    gravities = [-25, -50, -100, -200, -500]
     models = [("jelly", "snow", "liquid") * len(gravities)]
+
+    if not os.path.exists("datasets"):
+        os.mkdir("datasets")
 
     it = 0
     for gravity, models in tqdm(zip(gravities, models)):
         _GRAVITY = gravity
         for model in models:
             try:
-                outdir = f"{model}_{it}"
+                outdir = f"datasets/{model}_{it % len(gravities)}"
                 _MODEL = model
-                sim(True, outdir)
-            except Exception as e:
+                offline_sim(True, outdir, False)
+            except Exception:
                 logger.error("This sim went wrong, skipping")
 
             it += 1
+
+
+if __name__ == "__main__":
+    app()

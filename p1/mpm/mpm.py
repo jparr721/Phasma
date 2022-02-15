@@ -2,6 +2,7 @@ from typing import Final
 
 import numba as nb
 import numpy as np
+from tensorflow.keras.models import Model
 
 from .utils import *
 
@@ -56,6 +57,46 @@ def p2g(
 
                 gv[bc[0] + i, bc[1] + j] += weight * (v[p] * mass + affine @ dpos)
                 gm[bc[0] + i, bc[1] + j] += weight * mass
+
+
+def nn_g2p(
+    gv: np.ndarray,
+    gm: np.ndarray,
+    x: np.ndarray,
+    F: np.ndarray,
+    Jp: np.ndarray,
+    ml_model: Model,
+    model: str = "jelly",
+):
+    gmgv = np.concatenate((gm, gv), axis=2)
+    gmgv = gmgv.reshape(1, *gmgv.shape)
+    x, F_ = ml_model.predict(gmgv)
+    print(x)
+    print(F_)
+    print(x.shape)
+    print(F_.shape)
+
+    for p in nb.prange(len(x)):
+        if model != "jelly":
+
+            if model == "snow":
+                U, sig, V = np.linalg.svd(F_)
+                sig = np.clip(sig, 1.0 - 2.5e-2, 1.0 + 7.5e-3)
+                sig = np.eye(2) * sig
+
+                old_J = np.linalg.det(F_)
+                F_ = U @ sig @ V.T
+                Jp[p] = np.clip(Jp[p] * old_J / np.linalg.det(F_), 0.6, 20.0)
+
+            if model == "liquid":
+                U, sig, V = np.linalg.svd(F_)
+                J = 1.0
+                for dd in range(2):
+                    J *= sig[dd]
+                F_ = np.eye(2)
+                F_[0, 0] = J
+
+        F[p] = F_
 
 
 @nb.njit

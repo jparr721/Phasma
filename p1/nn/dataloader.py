@@ -13,19 +13,19 @@ Group = namedtuple("Group", ["x", "gm", "gv"])
 
 @dataclass(frozen=True)
 class InputOutputGroup(object):
-    x: np.ndarray
-    F: np.ndarray
+    igm: np.ndarray
+    igv: np.ndarray
     gm: np.ndarray
     gv: np.ndarray
 
 
 def load_model_result(timestep_folder_path: str):
     files = list(os.listdir(timestep_folder_path))
+    igm = np.load(os.path.join(timestep_folder_path, files[files.index("igm.npy")]))
+    igv = np.load(os.path.join(timestep_folder_path, files[files.index("igv.npy")]))
     gm = np.load(os.path.join(timestep_folder_path, files[files.index("gm.npy")]))
     gv = np.load(os.path.join(timestep_folder_path, files[files.index("gv.npy")]))
-    x = np.load(os.path.join(timestep_folder_path, files[files.index("x.npy")]))
-    F = np.load(os.path.join(timestep_folder_path, files[files.index("F.npy")]))
-    return InputOutputGroup(x, F, gm, gv)
+    return InputOutputGroup(igm, igv, gm, gv)
 
 
 def load_model_results(folder_path: str) -> List[InputOutputGroup]:
@@ -48,13 +48,17 @@ def load_datasets(model: str, datasets_path: str) -> Dict[str, List[InputOutputG
         os.path.join(datasets_path, folder) for folder in os.listdir(datasets_path)
     ]
 
-    folders = list(filter(lambda x: model in x, folders))
+    folders = list(
+        filter(lambda x: "jelly" in x or "snow" in x or "liquid" in x, folders)
+    )
 
-    datasets = {
-        os.path.basename(folder): load_model_results(folder) for folder in tqdm(folders)
-    }
+    for folder in tqdm(folders):
+        with open(f"{folder}.pkl", "wb+") as pf:
+            pickle.dump(load_model_results(folder), pf)
 
-    with open("loaded.pkl", "wb+") as pf:
-        pickle.dump(datasets, pf)
-
+    datasets = {}
+    for file in os.listdir("."):
+        if file.endswith(".pkl") and model in file:
+            n, _ = file.split(".")
+            datasets[n] = pickle.load(open(file, "rb"))
     return datasets
