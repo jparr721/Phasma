@@ -144,8 +144,8 @@ def grid_op(
     """
     v_allowed: Final[float] = dx * 0.9 / dt
     boundary: Final[int] = 3
-    for i in range(res + 1):
-        for j in range(res + 1):
+    for i in range(gv.shape[0]):
+        for j in range(gv.shape[1]):
             if gm[i, j][0] > 0:
                 gv[i, j] /= gm[i, j][0]
                 gv[i, j][1] += dt * gravity
@@ -167,7 +167,6 @@ def nn_grid_op(
     gv: np.ndarray,
     gm: np.ndarray,
 ):
-    input_ = np.concatenate((gv[:64, :64, :], gm[:64, :64, :]), axis=2)
-    grid = model.predict(input_.reshape(1, *input_.shape))
-    gv[:64, :64, :] = grid[0, :, :, :2]
-    gm[:64, :64, 0] = grid[0, :, :, 2]
+    grid = model.predict(np.expand_dims(np.concatenate((gv, gm), axis=2), axis=0))
+    gv[:, :, :] = grid[0, :, :, :2]
+    gm[:, :, :] = grid[0, :, :, 2]

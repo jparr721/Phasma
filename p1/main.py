@@ -1,11 +1,9 @@
 import os
 from typing import Final
 
-import numba as nb
 import taichi as ti
 import typer
 from loguru import logger
-from tensorflow.keras.models import Model, load_model
 from tqdm import tqdm
 
 from mpm.mpm import *
@@ -19,18 +17,18 @@ _DX: Final[float] = 1 / _RES
 _INV_DX: Final[float] = 1 / _DX
 _MASS: Final[float] = 1.0
 _VOL: Final[float] = 1.0
-_E: Final[float] = 1e3
+_E: Final[float] = 1e4
 _NU: Final[float] = 0.2
 _MU_0: Final[float] = _E / (2 * (1 + _NU))
 _LAMBDA_0: Final[float] = _E * _NU / ((1 + _NU) * (1 - 2 * _NU))
-_GRAVITY = -100.0
-_MODEL = "jelly"
-_STEPS: Final[int] = 150
+_GRAVITY = -300.0
+_MODEL = "liquid"
+_STEPS = 1500
 
 dirname = os.path.join(os.path.dirname(os.path.abspath(__file__)), "nn", "saved_models")
-_ML_MODEL: Final[Model] = load_model(os.path.join(dirname, "cnn_model.h5"))
-# _ML_MODEL = None
-_USE_ML = True
+# _ML_MODEL: Final[Model] = load_model(os.path.join(dirname, "cnn_model.h5"))
+_ML_MODEL = None
+_USE_ML = False
 
 
 def generate_cube_points(r: Tuple[float, float], res: int = 10) -> np.ndarray:
@@ -74,13 +72,12 @@ def advance(
         _MODEL,
     )
 
-    ig.append(np.concatenate((gv[:64, :64, :], gm[:64, :64, :]), axis=2))
-
+    ig.append(np.concatenate((gv, gm), axis=2))
     if _USE_ML:
         nn_grid_op(_ML_MODEL, gv, gm)
     else:
         grid_op(_RES, _DX, _DT, _GRAVITY, gv, gm)
-    g.append(np.concatenate((gv[:64, :64, :], gm[:64, :64, :]), axis=2))
+    g.append(np.concatenate((gv, gm), axis=2))
 
     g2p(_INV_DX, _DT, gv, x, v, F, C, Jp, _MODEL)
 
@@ -123,8 +120,9 @@ def offline_sim(
     try:
         for _ in pb:
             pb.set_postfix({"model": _MODEL})
-            gv = np.zeros(((_RES + 1), (_RES + 1), 2))
-            gm = np.zeros(((_RES + 1), (_RES + 1), 1))
+            gv = np.zeros((_RES, _RES, 2))
+            gm = np.zeros((_RES, _RES, 1))
+
             advance(gv, gm, x, v, F, C, Jp, ig, g)
 
             xv.append(x.copy())
@@ -155,13 +153,38 @@ def offline_sim(
 
 @app.command()
 def gen_data():
-    global _GRAVITY, _MODEL
-    gravities = [-20, -30, -40, -50, -75, -100, -150, -200, -300, -500]
+    global _GRAVITY, _MODEL, _USE_ML, _STEPS
+
+    _USE_ML = False
+    _STEPS = 4000
+
+    gravities = [
+        -20,
+        -30,
+        -40,
+        -50,
+        -60,
+        -70,
+        -80,
+        -90,
+        -100,
+        -110,
+        -120,
+        -130,
+        -140,
+        -150,
+        -160,
+        -170,
+        -180,
+        -190,
+        -200,
+        -300,
+    ]
 
     if not os.path.exists("datasets"):
         os.mkdir("datasets")
 
-    for model in ("jelly", "liquid", "snow"):
+    for model in ("jelly",):  # "liquid", "snow"):
         for gravity in tqdm(gravities):
             _GRAVITY = gravity
             try:
