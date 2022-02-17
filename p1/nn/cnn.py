@@ -1,18 +1,20 @@
 import os
-import pickle
 import sys
+import threading
 from dataclasses import dataclass
-from typing import Dict, Final, List
+from time import sleep
+from typing import Dict, List, Tuple
 
 import numpy as np
-from dataloader import InputOutputGroup, load_datasets
+import psutil
 from loguru import logger
 from tensorflow.keras import Input, Model, Sequential
 from tensorflow.keras import layers as L
 from tensorflow.keras.callbacks import EarlyStopping
 from tensorflow.keras.optimizers import Adam
-from tensorflow.python.keras.saving.save import load_model
 from tqdm import tqdm
+
+from nn.dataloader import InputOutputGroup, load_datasets, load_pickle_files
 
 _MODEL_OUTPUT_PATH = "cnn_model.h5"
 
@@ -34,33 +36,9 @@ def denormalize(value: float, min_: float, max_: float) -> float:
     return (value + min_) * (max_ - min_)
 
 
-def _load(model: str, datasets_path: str) -> Dict[str, List[InputOutputGroup]]:
-    logger.info("Checking file caches")
-    datasets = {}
-    for _file in tqdm(os.listdir(datasets_path)):
-        file = os.path.join(datasets_path, _file)
-        if file.endswith(".pkl") and model in file:
-            n, _ = _file.split(".")
-            datasets[n] = pickle.load(open(file, "rb"))
-
-    if len(datasets) > 0:
-        logger.success("Cached dataset found and loaded")
-        return datasets
-    else:
-        logger.warning("No cached dataset found, loading from disk")
-        logger.warning("Note: if the page cache is not warm this will take _forever_")
-        return load_datasets(model, datasets_path)
-
-
-def make_dataset(model: str) -> Dataset:
+def make_dataset(datasets: Dict[str, List[InputOutputGroup]]) -> Dataset:
     x = []
     y = []
-
-    datasets_path = os.path.join(
-        os.path.abspath(os.path.dirname(__file__)), "..", "datasets"
-    )
-
-    datasets = _load(model, datasets_path)
 
     for data in tqdm(datasets.values()):
         for row in data:
@@ -122,33 +100,64 @@ def make_model():
     x = L.concatenate([x, e1])
     x = conv_block("dec_1", 3, act=None, t=True, bn=False)(x)
 
-    return Model(inputs=inputs, outputs=x)
+    model = Model(inputs=inputs, outputs=x)
+    model.compile(optimizer=Adam(0.0002, beta_1=0.5), loss="mse")
+    return model
 
 
-def train_model(model, sim):
-    dataset = make_dataset(sim)
+def poll_ram():
+    while True:
+        sleep(1)
+        usage = psutil.virtual_memory().active * 1e-9
 
-    logger.success("Dataset loaded")
+        if usage > 15:
+            logger.error("Memory limit reached, killing process")
+            os._exit(1)
 
-    x = dataset.x
-    y = dataset.y
 
-    logger.info(f"x.shape {x.shape}")
-    logger.info(f"y.shape {y.shape}")
+def train_model(model):
+    threading.Thread(target=poll_ram, daemon=True).start()
+    base = os.path.join(os.path.abspath(os.path.dirname(__file__)), "..", "datasets")
 
-    try:
-        model.fit(
-            x,
-            y,
-            epochs=50,
-            batch_size=128,
-            validation_split=0.3,
-            callbacks=[
-                EarlyStopping(monitor="loss", patience=5, restore_best_weights=True)
-            ],
+    # Check if we have cached data
+    logger.info("Checking file caches")
+    pkl_files = [os.path.join(base, f) for f in os.listdir(base) if f.endswith(".pkl")]
+
+    if len(pkl_files) == 0:
+        logger.warning(
+            "No PKL files found, building them one by one (this can take awhile)"
         )
-    except Exception:
-        pass
+        pkl_files = load_datasets(base)
+
+    while len(pkl_files) > 0:
+        loaded, pkl_files = load_pickle_files(pkl_files)
+        dataset = make_dataset(loaded)
+
+        logger.success("Dataset loaded")
+
+        x = dataset.x
+        y = dataset.y
+
+        logger.info(f"x.shape {x.shape}")
+        logger.info(f"y.shape {y.shape}")
+
+        try:
+            model.fit(
+                x,
+                y,
+                epochs=50,
+                batch_size=256,
+                validation_split=0.3,
+                callbacks=[
+                    EarlyStopping(monitor="loss", patience=5, restore_best_weights=True)
+                ],
+            )
+        except KeyboardInterrupt:
+            logger.warning("Killed. Saving state if possible.")
+
+        # Free memory after training cycle
+        del dataset
+        del loaded
 
     return model
 
@@ -162,21 +171,3 @@ def save_model(model):
     logger.success("Model saved successfully")
 
     logger.info("Plotting")
-
-
-if __name__ == "__main__":
-    sim = sys.argv[1]
-    logger.info(f"Running {sim}")
-
-    if sim == "jelly":
-        model = make_model()
-        model.compile(optimizer=Adam(0.0002, beta_1=0.5), loss="mse")
-        logger.info(model.summary())
-    else:
-        dirname = os.path.join(os.path.dirname(os.path.abspath(__file__)), "saved_models")
-        if not os.path.exists(dirname):
-            os.mkdir(dirname)
-
-        model = load_model(f"{dirname}/{_MODEL_OUTPUT_PATH}")
-
-    save_model(train_model(model, sim))

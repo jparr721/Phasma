@@ -4,9 +4,11 @@ from typing import Final
 import taichi as ti
 import typer
 from loguru import logger
+from tensorflow.keras.models import load_model
 from tqdm import tqdm
 
 from mpm.mpm import *
+from nn.cnn import make_model, save_model, train_model
 
 app = typer.Typer(help="p1")
 
@@ -21,14 +23,14 @@ _E: Final[float] = 1e4
 _NU: Final[float] = 0.2
 _MU_0: Final[float] = _E / (2 * (1 + _NU))
 _LAMBDA_0: Final[float] = _E * _NU / ((1 + _NU) * (1 - 2 * _NU))
-_GRAVITY = -300.0
+_GRAVITY = -100.0
 _MODEL = "liquid"
 _STEPS = 1500
 
 dirname = os.path.join(os.path.dirname(os.path.abspath(__file__)), "nn", "saved_models")
-# _ML_MODEL: Final[Model] = load_model(os.path.join(dirname, "cnn_model.h5"))
-_ML_MODEL = None
-_USE_ML = False
+_ML_MODEL: Final[Model] = load_model(os.path.join(dirname, "cnn_model.h5"))
+# _ML_MODEL = None
+_USE_ML = True
 
 
 def generate_cube_points(r: Tuple[float, float], res: int = 10) -> np.ndarray:
@@ -88,7 +90,6 @@ def offline_sim(
     outdir: str = typer.Option("tmp"),
     use_gui: bool = typer.Option(False),
 ):
-    gui = ti.GUI()
     bc = generate_cube_points((0.4, 0.6), _SHAPE_RES)
     bc[:, 1] -= 0.35
     tc = generate_cube_points((0.4, 0.6), _SHAPE_RES)
@@ -138,6 +139,7 @@ def offline_sim(
 
     if use_gui:
         ti.init(arch=ti.cpu)
+        gui = ti.GUI()
         while gui.running and not gui.get_event(gui.ESCAPE):
             for i in range(0, len(xv), 10):
                 gui.clear(0x112F41)
@@ -193,6 +195,11 @@ def gen_data():
                 offline_sim(True, outdir, False)
             except Exception:
                 logger.error("This sim went wrong, skipping")
+
+
+@app.command()
+def train():
+    save_model(train_model(make_model()))
 
 
 if __name__ == "__main__":

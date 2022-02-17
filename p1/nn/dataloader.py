@@ -1,7 +1,7 @@
 import os
 import pickle
 from dataclasses import dataclass
-from typing import Dict, List
+from typing import Dict, List, Tuple
 
 import numpy as np
 from loguru import logger
@@ -34,7 +34,35 @@ def load_model_results(folder_path: str) -> List[InputOutputGroup]:
     return groups_at_timestep
 
 
-def load_datasets(model: str, datasets_path: str) -> Dict[str, List[InputOutputGroup]]:
+def load_pickle_files(
+    folders: List[str], mem_limit: int = 6
+) -> Tuple[Dict[str, List[InputOutputGroup]], List[str]]:
+    def is_memory_at_limit(arr_arrs: List[List[InputOutputGroup]]):
+        total_memory = 0
+        for arrs in arr_arrs:
+            for arr in arrs:
+                total_memory += arr.ig.nbytes
+                total_memory += arr.g.nbytes
+        total_memory *= 1e-9
+        logger.info(f"Total Memory Usage: {total_memory}")
+        return total_memory > mem_limit
+
+    datasets = {}
+    leftovers = []
+    at_memory_limit = False
+    for folder in tqdm(folders):
+        n, _ = os.path.basename(folder).split(".")
+        at_memory_limit = is_memory_at_limit(datasets.values())
+
+        if not at_memory_limit:
+            datasets[n] = pickle.load(open(folder, "rb"))
+        else:
+            leftovers.append(folder)
+
+    return datasets, leftovers
+
+
+def load_datasets(datasets_path: str) -> List[str]:
     folders = [
         os.path.join(datasets_path, folder) for folder in os.listdir(datasets_path)
     ]
@@ -43,13 +71,26 @@ def load_datasets(model: str, datasets_path: str) -> Dict[str, List[InputOutputG
         filter(lambda x: "jelly" in x or "snow" in x or "liquid" in x, folders)
     )
 
+    files = []
     for folder in tqdm(folders):
-        with open(f"{folder}.pkl", "wb+") as pf:
+        fn = f"{folder}.pkl"
+        with open(fn, "wb+") as pf:
+            files.append(fn)
             pickle.dump(load_model_results(folder), pf)
 
-    datasets = {}
-    for file in os.listdir("."):
-        if file.endswith(".pkl") and model in file:
-            n, _ = file.split(".")
-            datasets[n] = pickle.load(open(file, "rb"))
-    return datasets
+    return files
+
+
+if __name__ == "__main__":
+    datasets_path = os.path.join(
+        os.path.abspath(os.path.dirname(__file__)), "..", "datasets"
+    )
+
+    folders = [
+        os.path.join(datasets_path, folder)
+        for folder in os.listdir(datasets_path)
+        if folder.endswith(".pkl")
+    ]
+
+    _, leftovers = load_pickle_files(folders)
+    print(leftovers)

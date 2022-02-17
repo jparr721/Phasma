@@ -169,4 +169,4 @@ def nn_grid_op(
 ):
     grid = model.predict(np.expand_dims(np.concatenate((gv, gm), axis=2), axis=0))
     gv[:, :, :] = grid[0, :, :, :2]
-    gm[:, :, :] = grid[0, :, :, 2]
+    gm[:, :, :] = np.expand_dims(grid[0, :, :, 2], axis=2)
