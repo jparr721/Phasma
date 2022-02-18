@@ -122,14 +122,9 @@ def g2p(
         F[p] = F_
 
 
-@nb.njit
+# @nb.njit
 def grid_op(
-    res: int,
-    dx: float,
-    dt: float,
-    gravity: float,
-    gv: np.ndarray,
-    gm: np.ndarray,
+    res: int, dx: float, dt: float, gravity: float, gv: np.ndarray, gm: np.ndarray, ig, g
 ):
     """Grid normalization and gravity application, this also handles the collision
     scenario which, right now, is "STICKY", meaning the velocity is set to zero during
@@ -151,6 +146,9 @@ def grid_op(
                 gv[i, j][1] += dt * gravity
                 gv[i, j] = np.clip(gv[i, j], -v_allowed, v_allowed)
 
+    ig.append(np.concatenate((gv, gm), axis=2))
+    for i in range(gv.shape[0]):
+        for j in range(gv.shape[1]):
             # Sticky boundary condition
             I = [i, j]
             for d in range(2):
@@ -160,13 +158,25 @@ def grid_op(
                 if I[d] >= (res + 1) - boundary and gv[i, j][d] > 0:
                     gv[i, j] = 0
                     gm[i, j] = 0
+    g.append(np.concatenate((gv, gm), axis=2))
 
 
 def nn_grid_op(
+    dx: float,
+    dt: float,
+    gravity: float,
     model: Model,
     gv: np.ndarray,
     gm: np.ndarray,
 ):
+
+    v_allowed: Final[float] = dx * 0.9 / dt
+    for i in range(gv.shape[0]):
+        for j in range(gv.shape[1]):
+            if gm[i, j][0] > 0:
+                gv[i, j] /= gm[i, j][0]
+                gv[i, j][1] += dt * gravity
+                gv[i, j] = np.clip(gv[i, j], -v_allowed, v_allowed)
     grid = model.predict(np.expand_dims(np.concatenate((gv, gm), axis=2), axis=0))
     gv[:, :, :] = grid[0, :, :, :2]
     gm[:, :, :] = np.expand_dims(grid[0, :, :, 2], axis=2)

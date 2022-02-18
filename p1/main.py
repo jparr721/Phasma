@@ -19,13 +19,13 @@ _DX: Final[float] = 1 / _RES
 _INV_DX: Final[float] = 1 / _DX
 _MASS: Final[float] = 1.0
 _VOL: Final[float] = 1.0
-_E: Final[float] = 1e4
+_E: Final[float] = 1e3
 _NU: Final[float] = 0.2
 _MU_0: Final[float] = _E / (2 * (1 + _NU))
 _LAMBDA_0: Final[float] = _E * _NU / ((1 + _NU) * (1 - 2 * _NU))
-_GRAVITY = -100.0
+_GRAVITY = -200.0
 _MODEL = "jelly"
-_STEPS = 1500
+_STEPS = 2000
 
 dirname = os.path.join(os.path.dirname(os.path.abspath(__file__)), "nn", "saved_models")
 _ML_MODEL: Final[Model] = load_model(os.path.join(dirname, "cnn_model.h5"))
@@ -74,12 +74,10 @@ def advance(
         _MODEL,
     )
 
-    ig.append(np.concatenate((gv, gm), axis=2))
     if _USE_ML:
-        nn_grid_op(_ML_MODEL, gv, gm)
+        nn_grid_op(_DX, _DT, _GRAVITY, _ML_MODEL, gv, gm)
     else:
-        grid_op(_RES, _DX, _DT, _GRAVITY, gv, gm)
-    g.append(np.concatenate((gv, gm), axis=2))
+        grid_op(_RES, _DX, _DT, _GRAVITY, gv, gm, ig, g)
 
     g2p(_INV_DX, _DT, gv, x, v, F, C, Jp, _MODEL)
 

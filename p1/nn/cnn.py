@@ -1,9 +1,8 @@
 import os
-import sys
 import threading
 from dataclasses import dataclass
 from time import sleep
-from typing import Dict, List, Tuple
+from typing import Dict, List
 
 import numpy as np
 import psutil
@@ -17,6 +16,9 @@ from tqdm import tqdm
 from nn.dataloader import InputOutputGroup, load_datasets, load_pickle_files
 
 _MODEL_OUTPUT_PATH = "cnn_model.h5"
+_BATCH_SIZE = 128
+_EPOCHS = 200
+_LR = 0.0002
 
 
 @dataclass(frozen=True)
@@ -105,7 +107,7 @@ def make_model():
     x = conv_block("dec_1", 3, act=None, t=True, bn=False)(x)
 
     model = Model(inputs=inputs, outputs=x)
-    model.compile(optimizer=Adam(0.0002, beta_1=0.5, epsilon=0.1), loss="mae")
+    model.compile(optimizer=Adam(_LR, beta_1=0.5), loss="mae")
     return model
 
 
@@ -149,8 +151,8 @@ def train_model(model):
             model.fit(
                 x,
                 y,
-                epochs=200,
-                batch_size=128,
+                epochs=_EPOCHS,
+                batch_size=_BATCH_SIZE,
                 validation_split=0.3,
                 callbacks=[
                     EarlyStopping(monitor="loss", patience=5, restore_best_weights=True)
