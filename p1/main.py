@@ -24,7 +24,7 @@ _NU: Final[float] = 0.2
 _MU_0: Final[float] = _E / (2 * (1 + _NU))
 _LAMBDA_0: Final[float] = _E * _NU / ((1 + _NU) * (1 - 2 * _NU))
 _GRAVITY = -100.0
-_MODEL = "liquid"
+_MODEL = "jelly"
 _STEPS = 1500
 
 dirname = os.path.join(os.path.dirname(os.path.abspath(__file__)), "nn", "saved_models")

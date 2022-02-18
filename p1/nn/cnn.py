@@ -51,7 +51,7 @@ def make_dataset(datasets: Dict[str, List[InputOutputGroup]]) -> Dataset:
 def make_model():
     inputs = Input(shape=(64, 64, 3))
 
-    def conv_block(name, in_c, size=4, pad="same", t=False, act="relu", bn=True):
+    def conv_block(name, in_c, size=4, pad="same", t=False, act="relu", bn=True, do=0.3):
         block = Sequential(name=name)
 
         if not t:
@@ -78,21 +78,25 @@ def make_model():
 
         if bn:
             block.add(L.BatchNormalization())
+
+        if do > 0:
+            block.add(L.Dropout(do))
+
         return block
 
     channels = int(2**6 + 0.5)
     e1 = conv_block("enc_1", 3, act="leaky_relu")(inputs)
     e2 = conv_block("enc_2", channels, act="leaky_relu")(e1)
     e3 = conv_block("enc_3", channels * 2, act="leaky_relu")(e2)
-    e4 = conv_block("enc_4", channels * 2, act="leaky_relu")(e3)
-    e5 = conv_block("enc_5", channels * 4, act="leaky_relu", size=2, pad="valid")(e4)
-    e6 = conv_block("enc_6", channels * 4, act="leaky_relu", size=2, pad="valid")(e5)
+    e4 = conv_block("enc_4", channels * 4, act="leaky_relu")(e3)
+    e5 = conv_block("enc_5", channels * 8, act="leaky_relu", size=2, pad="valid")(e4)
+    e6 = conv_block("enc_6", channels * 8, act="leaky_relu", size=2, pad="valid")(e5)
 
-    x = conv_block("dec_6", channels * 4, t=True, size=2, pad="valid")(e6)
+    x = conv_block("dec_6", channels * 8, t=True, size=2, pad="valid")(e6)
     x = L.concatenate([x, e5])
-    x = conv_block("dec_5", channels * 4, t=True, size=2, pad="valid")(x)
+    x = conv_block("dec_5", channels * 8, t=True, size=2, pad="valid")(x)
     x = L.concatenate([x, e4])
-    x = conv_block("dec_4", channels * 2, t=True)(x)
+    x = conv_block("dec_4", channels * 4, t=True)(x)
     x = L.concatenate([x, e3])
     x = conv_block("dec_3", channels * 2, t=True)(x)
     x = L.concatenate([x, e2])
@@ -101,7 +105,7 @@ def make_model():
     x = conv_block("dec_1", 3, act=None, t=True, bn=False)(x)
 
     model = Model(inputs=inputs, outputs=x)
-    model.compile(optimizer=Adam(0.0002, beta_1=0.5), loss="mse")
+    model.compile(optimizer=Adam(0.0002, beta_1=0.5, epsilon=0.1), loss="mae")
     return model
 
 
@@ -145,8 +149,8 @@ def train_model(model):
             model.fit(
                 x,
                 y,
-                epochs=50,
-                batch_size=256,
+                epochs=200,
+                batch_size=128,
                 validation_split=0.3,
                 callbacks=[
                     EarlyStopping(monitor="loss", patience=5, restore_best_weights=True)
