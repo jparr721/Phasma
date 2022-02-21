@@ -1,6 +1,5 @@
 import os
-from functools import partial
-from typing import Final, List, Tuple
+from typing import Final, Tuple
 
 import numpy as np
 from loguru import logger
@@ -24,7 +23,7 @@ class Engine(object):
         self.p2g = p2g
         self.g2p = g2p
         self.grid_op = grid_op
-        self.apply_boundary_conditions = partial(apply_boundary_conditions, "sticky")
+        self.apply_boundary_conditions = apply_boundary_conditions
 
         if self.use_ml:
             ml_model_path = os.path.join(
@@ -50,6 +49,7 @@ class Engine(object):
         saved=[],
         use_gui=True,
         model="jelly",
+        boundary_ops="sticky",
         steps=2000,
         gravity=-200.0,
         E=1e3,
@@ -66,6 +66,11 @@ class Engine(object):
         lambda_0: Final[float] = E * nu / ((1 + nu) * (1 - 2 * nu))
 
         xv = [self.x.copy()]
+        igs = []
+        gs = []
+        igbc = []
+        gbc = []
+
         try:
             for _ in tqdm(range(steps), postfix={"model": model}):
                 self.gm = np.zeros((self.grid_res, self.grid_res, 1))
@@ -89,8 +94,13 @@ class Engine(object):
                     model,
                 )
 
+                igs.append(np.concatenate((self.gv, self.gm), axis=2))
                 self.grid_op(self.dx, self.dt, gravity, self.gv, self.gm)
-                self.apply_boundary_conditions(self.gv, self.gm)
+                gs.append(np.concatenate((self.gv, self.gm), axis=2))
+
+                igbc.append(np.concatenate((self.gv, self.gm), axis=2))
+                self.apply_boundary_conditions(self.gv, self.dx, boundary_ops)
+                gbc.append(np.concatenate((self.gv, self.gm), axis=2))
 
                 self.g2p(
                     self.inv_dx,
@@ -104,7 +114,8 @@ class Engine(object):
                     model,
                 )
 
-                xv.append(self.x.copy())
+                if use_gui:
+                    xv.append(self.x.copy())
 
             if len(saved) > 0:
                 self._unload(*saved)
@@ -146,11 +157,14 @@ class Engine(object):
             )
 
     def _unload(self, *names):
-        assert len(names) > 0
+        assert len(names) > 0, "Must have at least one key to save"
+        assert all([n in self.__dict__.keys() for n in names]), "Key not found"
+
         entries = len(self.__dict__[names[0]])
         for i in range(entries):
             name = os.path.join(self.outdir, str(i))
             os.mkdir(name)
             for name in names:
-                assert isinstance(self.__dict__[name], np.ndarray)
+                if not isinstance(self.__dict__[name], np.ndarray):
+                    raise ValueError("Specified object is not a numpy array")
                 np.save(f"{name}.npy", self.__dict__[name])

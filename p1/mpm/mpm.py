@@ -144,21 +144,58 @@ def grid_op(dx: float, dt: float, gravity: float, gv: np.ndarray, gm: np.ndarray
 
 
 @nb.njit
-def apply_boundary_conditions(bc_type: str, gv: np.ndarray, gm: np.ndarray, boundary=3):
-    def sticky():
-        for i in nb.prange(gv.shape[0]):
-            for j in nb.prange(gv.shape[1]):
-                I = [i, j]
-                for d in range(2):
-                    if I[d] < boundary and gv[i, j][d] < 0:
-                        gv[i, j] = 0
-                        gm[i, j] = 0
-                    if I[d] >= gv.shape[0] - boundary and gv[i, j][d] > 0:
-                        gv[i, j] = 0
-                        gm[i, j] = 0
+def apply_boundary_conditions(
+    gv: np.ndarray, dx: float, axis_op="sticky", lower_boundary=3
+):
+    upper_boundary = gv.shape[0] - lower_boundary
 
-    if bc_type == "sticky":
+    def colliding(i):
+        return i < lower_boundary or i >= upper_boundary
+
+    def separate_slip():
+        friction = 0.5
+        normals = [
+            unit_vector(0),
+            unit_vector(0) * -1,
+            unit_vector(1),
+            unit_vector(1) * -1,
+        ]
+
+        for i in range(gv.shape[0]):
+            for j in range(gv.shape[1]):
+                for normal in normals:
+                    if colliding(i) or colliding(j):
+                        v = gv[i, j]
+                        normal_component = np.dot(normal, v)
+
+                        # Ref mpm.graphics section 12
+                        if axis_op == "slip":
+                            v -= normal * normal_component
+                        elif axis_op == "separate":
+                            v -= normal * min(normal_component, 0.0)
+                        else:
+                            raise ValueError
+
+                        # Friction application
+                        if normal_component < 0 and np.linalg.norm(v) > 1e-30:
+                            v = normalized(v) * max(
+                                0, np.linalg.norm(v) + normal_component * friction
+                            )
+
+                        gv[i, j] = v
+
+    def sticky():
+        gv[0:lower_boundary, :] = 0.0
+        gv[:, 0:lower_boundary] = 0.0
+        gv[upper_boundary:, :] = 0.0
+        gv[:, upper_boundary:] = 0.0
+
+    if axis_op == "sticky":
         sticky()
+    elif axis_op == "separate" or axis_op == "slip":
+        separate_slip()
+    else:
+        raise ValueError
 
 
 def nn_grid_op(

@@ -121,6 +121,18 @@ def quadric_kernel(fx: np.ndarray):
 
 
 @nb.njit
+def unit_vector(axis: int):
+    n = np.zeros(2, dtype=np.float64)
+    n[axis] = 1
+    return n
+
+
+@nb.njit
+def normalized(v):
+    return v / np.linalg.norm(v)
+
+
+@nb.njit
 def oob(base: np.ndarray, res: int, ijk: np.ndarray = np.zeros(2)):
     tot = base + ijk
     # This is faster than numpy's ".any()" when dealing with high-throughput

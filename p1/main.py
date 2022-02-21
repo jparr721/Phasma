@@ -1,11 +1,6 @@
-import os
-from typing import Final, List
+from typing import List
 
-import taichi as ti
 import typer
-from loguru import logger
-from tensorflow.keras.models import load_model
-from tqdm import tqdm
 
 from mpm.engine import Engine, cube
 from mpm.mpm import *
@@ -23,12 +18,20 @@ def offline_sim(
     bounds = (0.4, 0.6)
     shape_res = 25
     c1 = cube(bounds, shape_res)
-    c1[:, 1] -= 0.35
+    c1[:, 0] -= 0.15
+    c1[:, 1] -= 0.30
     c2 = cube(bounds, shape_res)
 
     x = np.concatenate((c1, c2))
+    # x = c1.copy()
     e = Engine(outdir)
-    e.simulate(x, use_gui=use_gui, saved=saved)
+    e.simulate(
+        x,
+        use_gui=use_gui,
+        saved=saved,
+        model="jelly",
+        boundary_ops="slip",
+    )
 
 
 @app.command()
