@@ -140,13 +140,11 @@ def grid_op(dx: float, dt: float, gravity: float, gv: np.ndarray, gm: np.ndarray
             if gm[i, j][0] > 0:
                 gv[i, j] /= gm[i, j][0]
                 gv[i, j][1] += dt * gravity
-                # gv[i, j] = np.clip(gv[i, j], -v_allowed, v_allowed)
+                gv[i, j] = np.clip(gv[i, j], -v_allowed, v_allowed)
 
 
 @nb.njit
-def apply_boundary_conditions(
-    gv: np.ndarray, dx: float, axis_op="sticky", lower_boundary=3
-):
+def apply_boundary_conditions(gv: np.ndarray, axis_op="sticky", lower_boundary=3):
     upper_boundary = gv.shape[0] - lower_boundary
 
     def colliding(i):

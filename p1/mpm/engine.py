@@ -99,7 +99,7 @@ class Engine(object):
                 gs.append(np.concatenate((self.gv, self.gm), axis=2))
 
                 igbc.append(np.concatenate((self.gv, self.gm), axis=2))
-                self.apply_boundary_conditions(self.gv, self.dx, boundary_ops)
+                self.apply_boundary_conditions(self.gv, boundary_ops)
                 gbc.append(np.concatenate((self.gv, self.gm), axis=2))
 
                 self.g2p(
