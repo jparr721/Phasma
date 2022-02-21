@@ -1,3 +1,4 @@
+import os
 from typing import List
 
 import typer
@@ -11,7 +12,6 @@ app = typer.Typer(help="p1")
 
 @app.command()
 def offline_sim(
-    saved: List[str] = typer.Option([]),
     outdir: str = typer.Option("tmp"),
     use_gui: bool = typer.Option(False),
 ):
@@ -23,12 +23,10 @@ def offline_sim(
     c2 = cube(bounds, shape_res)
 
     x = np.concatenate((c1, c2))
-    # x = c1.copy()
     e = Engine(outdir)
     e.simulate(
         x,
         use_gui=use_gui,
-        saved=saved,
         model="jelly",
         boundary_ops="slip",
     )
@@ -42,15 +40,17 @@ def gen_data(
     gmax: int = typer.Option(-300),
     incr: int = typer.Option(10),
 ):
-    e = Engine()
+    datasets = os.path.join(os.path.dirname(os.path.abspath(__file__)), "datasets")
+    e = Engine(outdir=datasets)
 
     bounds = (0.4, 0.6)
     shape_res = 25
     c1 = cube(bounds, shape_res)
-    c1[:, 1] -= 0.35
+    c1[:, 0] -= 0.15
+    c1[:, 1] -= 0.30
     c2 = cube(bounds, shape_res)
+
     x = np.concatenate((c1, c2))
-    e = Engine()
     e.generate(x, model, steps, gmin, gmax, incr)
 
 

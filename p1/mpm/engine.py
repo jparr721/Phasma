@@ -1,5 +1,5 @@
 import os
-from typing import Final, Tuple
+from typing import Final, List, Tuple
 
 import numpy as np
 from loguru import logger
@@ -46,7 +46,6 @@ class Engine(object):
         self,
         x: np.ndarray,
         *,
-        saved=[],
         use_gui=True,
         model="jelly",
         boundary_ops="sticky",
@@ -66,10 +65,10 @@ class Engine(object):
         lambda_0: Final[float] = E * nu / ((1 + nu) * (1 - 2 * nu))
 
         xv = [self.x.copy()]
-        igs = []
-        gs = []
-        igbc = []
-        gbc = []
+        self.igs = []
+        self.gs = []
+        self.igbc = []
+        self.gbc = []
 
         try:
             for _ in tqdm(range(steps), postfix={"model": model}):
@@ -94,13 +93,13 @@ class Engine(object):
                     model,
                 )
 
-                igs.append(np.concatenate((self.gv, self.gm), axis=2))
+                self.igs.append(np.concatenate((self.gv, self.gm), axis=2))
                 self.grid_op(self.dx, self.dt, gravity, self.gv, self.gm)
-                gs.append(np.concatenate((self.gv, self.gm), axis=2))
+                self.gs.append(np.concatenate((self.gv, self.gm), axis=2))
 
-                igbc.append(np.concatenate((self.gv, self.gm), axis=2))
+                self.igbc.append(np.concatenate((self.gv, self.gm), axis=2))
                 self.apply_boundary_conditions(self.gv, boundary_ops)
-                gbc.append(np.concatenate((self.gv, self.gm), axis=2))
+                self.gbc.append(np.concatenate((self.gv, self.gm), axis=2))
 
                 self.g2p(
                     self.inv_dx,
@@ -116,11 +115,9 @@ class Engine(object):
 
                 if use_gui:
                     xv.append(self.x.copy())
-
-            if len(saved) > 0:
-                self._unload(*saved)
         except Exception as e:
             logger.error(f"Sim crashed: {e}")
+            raise e
 
         if use_gui:
             import taichi as ti
@@ -149,22 +146,35 @@ class Engine(object):
         incr: int,
     ):
         # Hardcoded for now to avoid annihilating our hdd
-        saved = ["igs", "gs", "igbc", "gbc"]
-        for gravity in tqdm(range(gmin, gmax, incr)):
-            self.outdir = os.path.join("datasets", f"{model}_{gravity * -1}")
-            self.simulate(
-                x, saved=saved, use_gui=False, model=model, steps=steps, gravity=gravity
-            )
+        saved: Final[List[str]] = ["igs", "gs", "igbc", "gbc"]
 
-    def _unload(self, *names):
-        assert len(names) > 0, "Must have at least one key to save"
-        assert all([n in self.__dict__.keys() for n in names]), "Key not found"
+        if not os.path.exists(self.outdir):
+            os.mkdir(self.outdir)
+        else:
+            raise RuntimeError("Remove the datasets directory to continue")
 
+        for gravity in tqdm(range(gmax, gmin, incr)):
+            data_dir = os.path.join(self.outdir, f"{model}_{gravity * -1}")
+
+            if not os.path.exists(data_dir):
+                os.mkdir(data_dir)
+            else:
+                raise RuntimeError(f"Dirname {data_dir} already exists")
+
+            self.simulate(x, use_gui=False, model=model, steps=steps, gravity=gravity)
+            self._unload(data_dir, *saved)
+
+    def _unload(self, root_dir: str, *names):
         entries = len(self.__dict__[names[0]])
+        logger.info(f"Saving {entries} entries")
         for i in range(entries):
-            name = os.path.join(self.outdir, str(i))
-            os.mkdir(name)
+            subdir = os.path.join(root_dir, str(i))
+
+            if not os.path.exists(subdir):
+                os.mkdir(subdir)
+            else:
+                raise RuntimeError(f"Dirname {subdir} already exists")
+
             for name in names:
-                if not isinstance(self.__dict__[name], np.ndarray):
-                    raise ValueError("Specified object is not a numpy array")
-                np.save(f"{name}.npy", self.__dict__[name])
+                d = os.path.join(subdir, name)
+                np.save(f"{d}.npy", self.__dict__[name][i])
