@@ -1,53 +1,30 @@
 import os
 import threading
-from dataclasses import dataclass
 from time import sleep
 from typing import Dict, List
 
 import numpy as np
 import psutil
 from loguru import logger
+from sklearn.preprocessing import MinMaxScaler
 from tensorflow.keras import Input, Model, Sequential
 from tensorflow.keras import layers as L
 from tensorflow.keras.callbacks import EarlyStopping
 from tensorflow.keras.optimizers import Adam
-from tqdm import tqdm
 
-from nn.dataloader import InputOutputGroup, load_datasets, load_pickle_files
+from nn.dataloader import Dataset, InputOutputGroup, load_datasets, load_pickle_files
 
 _MODEL_OUTPUT_PATH = "cnn_model.h5"
 _BATCH_SIZE = 128
 _EPOCHS = 200
-_LR = 0.0002
-
-
-@dataclass(frozen=True)
-class Dataset(object):
-    # Input
-    x: np.ndarray
-
-    # Targets
-    y: np.ndarray
-
-
-def normalize(value: float, min_: float, max_: float) -> float:
-    return (value - min_) / (max_ - min_)
-
-
-def denormalize(value: float, min_: float, max_: float) -> float:
-    return (value + min_) * (max_ - min_)
+_LR = 0.001
 
 
 def make_dataset(datasets: Dict[str, List[InputOutputGroup]]) -> Dataset:
-    x = []
-    y = []
-
-    for data in tqdm(datasets.values()):
-        for row in data:
-            x.append(row.ig)
-            y.append(row.g)
-
-    return Dataset(np.array(x), np.array(y))
+    return Dataset(
+        np.stack([v.ig for ls in datasets.values() for v in ls]),
+        np.stack([v.g for ls in datasets.values() for v in ls]),
+    )
 
 
 def make_model():
@@ -107,16 +84,16 @@ def make_model():
     x = conv_block("dec_1", 3, act=None, t=True, bn=False)(x)
 
     model = Model(inputs=inputs, outputs=x)
-    model.compile(optimizer=Adam(_LR, beta_1=0.5), loss="mae")
+    model.compile(optimizer=Adam(_LR, beta_1=0.5), loss="mse")
     return model
 
 
 def poll_ram():
     while True:
-        sleep(1)
+        sleep(3)
         usage = psutil.virtual_memory().active * 1e-9
 
-        if usage > 15:
+        if usage > 12:
             logger.error("Memory limit reached, killing process")
             os._exit(1)
 
@@ -135,14 +112,21 @@ def train_model(model):
         )
         pkl_files = load_datasets(base)
 
+    x_scaler = MinMaxScaler()
+    y_scaler = MinMaxScaler()
     while len(pkl_files) > 0:
-        loaded, pkl_files = load_pickle_files(pkl_files)
+        loaded, pkl_files = load_pickle_files(pkl_files, 5)
         dataset = make_dataset(loaded)
 
         logger.success("Dataset loaded")
 
-        x = dataset.x
-        y = dataset.y
+        x = x_scaler.fit_transform(dataset.x.reshape(-1, dataset.x.shape[-1])).reshape(
+            dataset.x.shape
+        )
+
+        y = y_scaler.fit_transform(dataset.y.reshape(-1, dataset.y.shape[-1])).reshape(
+            dataset.y.shape
+        )
 
         logger.info(f"x.shape {x.shape}")
         logger.info(f"y.shape {y.shape}")
@@ -164,6 +148,8 @@ def train_model(model):
         # Free memory after training cycle
         del dataset
         del loaded
+
+        # logger.success("Saving Scalers")
 
     return model
 

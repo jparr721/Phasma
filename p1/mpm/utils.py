@@ -116,6 +116,11 @@ def first_piola_stress(
 
 
 @nb.njit
+def quadric_kernel(fx: np.ndarray):
+    return [0.5 * (1.5 - fx) ** 2, 0.75 - (fx - 1) ** 2, 0.5 * (fx - 0.5) ** 2]
+
+
+@nb.njit
 def oob(base: np.ndarray, res: int, ijk: np.ndarray = np.zeros(2)):
     tot = base + ijk
     # This is faster than numpy's ".any()" when dealing with high-throughput

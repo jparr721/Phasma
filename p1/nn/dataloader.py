@@ -44,20 +44,22 @@ def load_pickle_files(
                 total_memory += arr.ig.nbytes
                 total_memory += arr.g.nbytes
         total_memory *= 1e-9
-        logger.info(f"Total Memory Usage: {total_memory}")
-        return total_memory > mem_limit
+        return total_memory > mem_limit, total_memory
 
     datasets = {}
     leftovers = []
     at_memory_limit = False
+    total_memory = 0
     for folder in tqdm(folders):
         n, _ = os.path.basename(folder).split(".")
-        at_memory_limit = is_memory_at_limit(datasets.values())
+        at_memory_limit, total_memory = is_memory_at_limit(list(datasets.values()))
 
         if not at_memory_limit:
             datasets[n] = pickle.load(open(folder, "rb"))
         else:
             leftovers.append(folder)
+
+    logger.info(f"Using {total_memory}gb of memory.")
 
     return datasets, leftovers
 
@@ -81,16 +83,10 @@ def load_datasets(datasets_path: str) -> List[str]:
     return files
 
 
-if __name__ == "__main__":
-    datasets_path = os.path.join(
-        os.path.abspath(os.path.dirname(__file__)), "..", "datasets"
-    )
+@dataclass(frozen=True)
+class Dataset(object):
+    # Input
+    x: np.ndarray
 
-    folders = [
-        os.path.join(datasets_path, folder)
-        for folder in os.listdir(datasets_path)
-        if folder.endswith(".pkl")
-    ]
-
-    _, leftovers = load_pickle_files(folders)
-    print(leftovers)
+    # Targets
+    y: np.ndarray

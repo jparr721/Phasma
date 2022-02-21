@@ -36,7 +36,7 @@ def p2g(
             raise RuntimeError
         fx = (x[p] * inv_dx - bc).astype(np.float64)
 
-        w = [0.5 * (1.5 - fx) ** 2, 0.75 - (fx - 1) ** 2, 0.5 * (fx - 0.5) ** 2]
+        w = quadric_kernel(fx)
 
         mu, lambda_ = (
             constant_hardening(mu_0, lambda_0, _JELLY_HARDENING)
@@ -48,8 +48,8 @@ def p2g(
 
         affine = first_piola_stress(F[p], inv_dx, mu, lambda_, dt, volume, mass, C[p])
 
-        for i in range(3):
-            for j in range(3):
+        for i in nb.prange(3):
+            for j in nb.prange(3):
                 if oob(bc, gv.shape[0], np.array((i, j))):
                     print("p2g bc", bc)
                     raise RuntimeError
@@ -80,7 +80,7 @@ def g2p(
             raise RuntimeError
         fx = x[p] * inv_dx - (bc).astype(np.float64)
 
-        w = [0.5 * (1.5 - fx) ** 2, 0.75 - (fx - 1) ** 2, 0.5 * (fx - 0.5) ** 2]
+        w = quadric_kernel(fx)
 
         C[p] = 0.0
         v[p] = 0.0
@@ -122,43 +122,43 @@ def g2p(
         F[p] = F_
 
 
-# @nb.njit
-def grid_op(
-    res: int, dx: float, dt: float, gravity: float, gv: np.ndarray, gm: np.ndarray, ig, g
-):
+@nb.njit
+def grid_op(dx: float, dt: float, gravity: float, gv: np.ndarray, gm: np.ndarray):
     """Grid normalization and gravity application, this also handles the collision
     scenario which, right now, is "STICKY", meaning the velocity is set to zero during
     collision scenarios.
 
     Args:
-        grid_resolution (int): grid_resolution
         dt (float): dt
         gravity (float): gravity
         grid_velocity (np.ndarray): grid_velocity
         grid_mass (np.ndarray): grid_mass
     """
     v_allowed: Final[float] = dx * 0.9 / dt
-    boundary: Final[int] = 3
     for i in range(gv.shape[0]):
         for j in range(gv.shape[1]):
             if gm[i, j][0] > 0:
                 gv[i, j] /= gm[i, j][0]
                 gv[i, j][1] += dt * gravity
-                gv[i, j] = np.clip(gv[i, j], -v_allowed, v_allowed)
+                # gv[i, j] = np.clip(gv[i, j], -v_allowed, v_allowed)
 
-    ig.append(np.concatenate((gv, gm), axis=2))
-    for i in range(gv.shape[0]):
-        for j in range(gv.shape[1]):
-            # Sticky boundary condition
-            I = [i, j]
-            for d in range(2):
-                if I[d] < boundary and gv[i, j][d] < 0:
-                    gv[i, j] = 0
-                    gm[i, j] = 0
-                if I[d] >= (res + 1) - boundary and gv[i, j][d] > 0:
-                    gv[i, j] = 0
-                    gm[i, j] = 0
-    g.append(np.concatenate((gv, gm), axis=2))
+
+@nb.njit
+def apply_boundary_conditions(bc_type: str, gv: np.ndarray, gm: np.ndarray, boundary=3):
+    def sticky():
+        for i in nb.prange(gv.shape[0]):
+            for j in nb.prange(gv.shape[1]):
+                I = [i, j]
+                for d in range(2):
+                    if I[d] < boundary and gv[i, j][d] < 0:
+                        gv[i, j] = 0
+                        gm[i, j] = 0
+                    if I[d] >= gv.shape[0] - boundary and gv[i, j][d] > 0:
+                        gv[i, j] = 0
+                        gm[i, j] = 0
+
+    if bc_type == "sticky":
+        sticky()
 
 
 def nn_grid_op(
