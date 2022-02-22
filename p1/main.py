@@ -56,7 +56,7 @@ def gen_data(
 
 @app.command()
 def train():
-    save_model(train_model(make_model()))
+    save_model(train_model(make_model(dropout=0.3)))
 
 
 if __name__ == "__main__":

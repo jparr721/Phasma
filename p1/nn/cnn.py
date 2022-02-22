@@ -4,15 +4,17 @@ from time import sleep
 from typing import Dict, List
 
 import numpy as np
-import psutil
+import tensorflow as tf
 from loguru import logger
 from sklearn.preprocessing import MinMaxScaler
 from tensorflow.keras import Input, Model, Sequential
 from tensorflow.keras import layers as L
 from tensorflow.keras.callbacks import EarlyStopping
+from tensorflow.keras.initializers import RandomNormal
 from tensorflow.keras.optimizers import Adam
 
-from nn.dataloader import Dataset, InputOutputGroup, load_datasets, load_pickle_files
+from nn.dataloader import (Dataset, InputOutputGroup, load_datasets,
+                           load_pickle_files)
 
 _MODEL_OUTPUT_PATH = "cnn_model.h5"
 _BATCH_SIZE = 128
@@ -22,68 +24,102 @@ _LR = 0.001
 
 def make_dataset(datasets: Dict[str, List[InputOutputGroup]]) -> Dataset:
     return Dataset(
-        np.stack([v.ig for ls in datasets.values() for v in ls]),
-        np.stack([v.g for ls in datasets.values() for v in ls]),
+        np.stack([v.x for ls in datasets.values() for v in ls]),
+        np.stack([v.y for ls in datasets.values() for v in ls]),
     )
 
 
-def make_model():
-    inputs = Input(shape=(64, 64, 3))
-
-    def conv_block(name, in_c, size=4, pad="same", t=False, act="relu", bn=True, do=0.3):
+def make_model(*, input_shape=(64, 64, 3), expo=6, dropout=0.0):
+    def conv_block(
+        name, filters, kernel_size=4, pad="same", t=False, act="relu", bn=True
+    ):
         block = Sequential(name=name)
+
+        if act == "relu":
+            block.add(L.ReLU())
+        elif act == "leaky_relu":
+            block.add(L.LeakyReLU(0.2))
 
         if not t:
             block.add(
                 L.Conv2D(
-                    in_c,
-                    kernel_size=size,
-                    strides=2,
+                    filters,
+                    kernel_size=kernel_size,
+                    strides=(2, 2),
                     padding=pad,
                     use_bias=True,
-                    activation=act,
+                    activation=None,
+                    kernel_initializer=RandomNormal(0.0, 0.2),
                 )
             )
         else:
             block.add(L.UpSampling2D(interpolation="bilinear"))
             block.add(
                 L.Conv2DTranspose(
-                    filters=in_c,
-                    kernel_size=size - 1,
+                    filters=filters,
+                    kernel_size=kernel_size - 1,
                     padding=pad,
-                    activation=act,
+                    activation=None,
                 )
             )
 
-        if bn:
-            block.add(L.BatchNormalization())
+        if dropout > 0:
+            block.add(L.SpatialDropout2D(dropout))
 
-        if do > 0:
-            block.add(L.Dropout(do))
+        if bn:
+            block.add(L.BatchNormalization(axis=-1, epsilon=1e-05, momentum=0.9))
 
         return block
 
-    channels = int(2**6 + 0.5)
-    e1 = conv_block("enc_1", 3, act="leaky_relu")(inputs)
-    e2 = conv_block("enc_2", channels, act="leaky_relu")(e1)
-    e3 = conv_block("enc_3", channels * 2, act="leaky_relu")(e2)
-    e4 = conv_block("enc_4", channels * 4, act="leaky_relu")(e3)
-    e5 = conv_block("enc_5", channels * 8, act="leaky_relu", size=2, pad="valid")(e4)
-    e6 = conv_block("enc_6", channels * 8, act="leaky_relu", size=2, pad="valid")(e5)
+    channels = int(2**expo + 0.5)
+    e0 = Sequential(name="enc_0")
+    e0.add(
+        L.Conv2D(
+            filters=3,
+            kernel_size=4,
+            strides=(2, 2),
+            padding="same",
+            activation=None,
+            data_format="channels_last",
+        )
+    )
+    e1 = conv_block("enc_1", channels, act="leaky_relu")
+    e2 = conv_block("enc_2", channels * 2, act="leaky_relu")
+    e3 = conv_block("enc_3", channels * 4, act="leaky_relu")
+    e4 = conv_block("enc_4", channels * 8, act="leaky_relu", kernel_size=2, pad="valid")
+    e5 = conv_block("enc_5", channels * 8, act="leaky_relu", kernel_size=2, pad="valid")
 
-    x = conv_block("dec_6", channels * 8, t=True, size=2, pad="valid")(e6)
-    x = L.concatenate([x, e5])
-    x = conv_block("dec_5", channels * 8, t=True, size=2, pad="valid")(x)
-    x = L.concatenate([x, e4])
-    x = conv_block("dec_4", channels * 4, t=True)(x)
-    x = L.concatenate([x, e3])
-    x = conv_block("dec_3", channels * 2, t=True)(x)
-    x = L.concatenate([x, e2])
-    x = conv_block("dec_2", channels, t=True)(x)
-    x = L.concatenate([x, e1])
-    x = conv_block("dec_1", 3, act=None, t=True, bn=False)(x)
+    dec_5 = conv_block("dec_5", channels * 8, t=True, kernel_size=2, pad="valid")
+    dec_4 = conv_block("dec_4", channels * 8, t=True, kernel_size=2, pad="valid")
+    dec_3 = conv_block("dec_3", channels * 4, t=True)
+    dec_2 = conv_block("dec_2", channels * 2, t=True)
+    dec_1 = conv_block("dec_1", channels, act=None, t=True, bn=False)
+    dec_0 = Sequential(name="dec_0")
+    dec_0.add(L.ReLU())
+    dec_0.add(L.Conv2DTranspose(3, kernel_size=4, strides=(2, 2), padding="same"))
 
-    model = Model(inputs=inputs, outputs=x)
+    # Forward Pass
+    inputs = Input(shape=input_shape)
+    out0 = e0(inputs)
+    out1 = e1(out0)
+    out2 = e2(out1)
+    out3 = e3(out2)
+    out4 = e4(out3)
+    out5 = e5(out4)
+
+    dout5 = dec_5(out5)
+    dout5_out4 = tf.concat([dout5, out4], axis=3)
+    dout4 = dec_4(dout5_out4)
+    dout4_out3 = tf.concat([dout4, out3], axis=3)
+    dout3 = dec_3(dout4_out3)
+    dout3_out2 = tf.concat([dout3, out2], axis=3)
+    dout2 = dec_2(dout3_out2)
+    dout2_out1 = tf.concat([dout2, out1], axis=3)
+    dout1 = dec_1(dout2_out1)
+    dout1_out0 = tf.concat([dout1, out0], axis=3)
+    dout0 = dec_0(dout1_out0)
+
+    model = Model(inputs=inputs, outputs=dout0)
     model.compile(optimizer=Adam(_LR, beta_1=0.5), loss="mse")
     return model
 
@@ -97,7 +133,7 @@ def poll_ram():
                 os.popen("free --giga --total | awk '/^Total:/ {print $3}'").read()
             )
 
-            if used > 29:
+            if used > 30:
                 logger.error("Memory limit reached, killing process")
                 logger.warning("Memory will not be cleaned up, I suggest a reboot")
                 os._exit(1)
@@ -106,7 +142,7 @@ def poll_ram():
 
 
 def train_model(model):
-    threading.Thread(target=poll_ram, daemon=True).start()
+    # threading.Thread(target=poll_ram, daemon=True).start()
     base = os.path.join(os.path.abspath(os.path.dirname(__file__)), "..", "datasets")
 
     # Check if we have cached data
@@ -131,17 +167,17 @@ def train_model(model):
             dataset.x.shape
         )
 
-        y = y_scaler.fit_transform(dataset.y.reshape(-1, dataset.y.shape[-1])).reshape(
-            dataset.y.shape
-        )
+        # y = y_scaler.fit_transform(dataset.y.reshape(-1, dataset.y.shape[-1])).reshape(
+        #     dataset.y.shape
+        # )
 
         logger.info(f"x.shape {x.shape}")
-        logger.info(f"y.shape {y.shape}")
+        logger.info(f"y.shape {dataset.y.shape}")
 
         try:
             model.fit(
                 x,
-                y,
+                dataset.y,
                 epochs=_EPOCHS,
                 batch_size=_BATCH_SIZE,
                 validation_split=0.3,

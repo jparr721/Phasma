@@ -10,15 +10,15 @@ from tqdm import tqdm
 
 @dataclass(frozen=True)
 class InputOutputGroup(object):
-    ig: np.ndarray
-    g: np.ndarray
+    x: np.ndarray
+    y: np.ndarray
 
 
 def load_model_result(timestep_folder_path: str):
     files = list(os.listdir(timestep_folder_path))
-    ig = np.load(os.path.join(timestep_folder_path, files[files.index("ig.npy")]))
-    g = np.load(os.path.join(timestep_folder_path, files[files.index("g.npy")]))
-    return InputOutputGroup(ig, g)
+    x = np.load(os.path.join(timestep_folder_path, files[files.index("igbc.npy")]))
+    y = np.load(os.path.join(timestep_folder_path, files[files.index("gbc.npy")]))
+    return InputOutputGroup(x, y)
 
 
 def load_model_results(folder_path: str) -> List[InputOutputGroup]:
@@ -41,8 +41,8 @@ def load_pickle_files(
         total_memory = 0
         for arrs in arr_arrs:
             for arr in arrs:
-                total_memory += arr.ig.nbytes
-                total_memory += arr.g.nbytes
+                total_memory += arr.x.nbytes
+                total_memory += arr.y.nbytes
         total_memory *= 1e-9
         return total_memory > mem_limit, total_memory
 
