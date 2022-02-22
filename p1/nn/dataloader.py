@@ -13,6 +13,14 @@ class InputOutputGroup(object):
     x: np.ndarray
     y: np.ndarray
 
+@dataclass(frozen=True)
+class Dataset(object):
+    # Input
+    x: np.ndarray
+
+    # Targets
+    y: np.ndarray
+
 
 def load_model_result(timestep_folder_path: str):
     files = list(os.listdir(timestep_folder_path))
@@ -83,10 +91,3 @@ def load_datasets(datasets_path: str) -> List[str]:
     return files
 
 
-@dataclass(frozen=True)
-class Dataset(object):
-    # Input
-    x: np.ndarray
-
-    # Targets
-    y: np.ndarray

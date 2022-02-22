@@ -1,5 +1,4 @@
 import os
-from typing import List
 
 import typer
 
@@ -14,6 +13,9 @@ app = typer.Typer(help="p1")
 def offline_sim(
     outdir: str = typer.Option("tmp"),
     use_gui: bool = typer.Option(False),
+    model: str = typer.Option("jelly"),
+    steps: int = typer.Option(4000),
+    use_ml: bool = typer.Option(False),
 ):
     bounds = (0.4, 0.6)
     shape_res = 25
@@ -23,12 +25,13 @@ def offline_sim(
     c2 = cube(bounds, shape_res)
 
     x = np.concatenate((c1, c2))
-    e = Engine(outdir)
+    e = Engine(outdir, use_ml=use_ml)
     e.simulate(
         x,
         use_gui=use_gui,
-        model="jelly",
+        model=model,
         boundary_ops="slip",
+        steps=steps,
     )
 
 

@@ -26,8 +26,10 @@ class Engine(object):
         self.apply_boundary_conditions = apply_boundary_conditions
 
         if self.use_ml:
+            logger.info("Loading ML Model")
             ml_model_path = os.path.join(
                 os.path.dirname(os.path.abspath(__file__)),
+                "..",
                 "nn",
                 "saved_models",
                 "cnn_model.h5",
@@ -98,7 +100,10 @@ class Engine(object):
                 self.gs.append(np.concatenate((self.gv, self.gm), axis=2))
 
                 self.igbc.append(np.concatenate((self.gv, self.gm), axis=2))
-                self.apply_boundary_conditions(self.gv, boundary_ops)
+                if self.use_ml:
+                    self.apply_boundary_conditions(self.gv, boundary_ops)
+                else:
+                    self.ml_boundary_conditions(self.gv)
                 self.gbc.append(np.concatenate((self.gv, self.gm), axis=2))
 
                 self.g2p(
@@ -163,6 +168,14 @@ class Engine(object):
 
             self.simulate(x, use_gui=False, model=model, steps=steps, gravity=gravity)
             self._unload(data_dir, *saved)
+
+    def ml_boundary_conditions(self, gv: np.ndarray):
+        assert self.use_ml
+        grid = self.ml_model.predict(
+            np.expand_dims(np.concatenate((gv, self.gm), axis=2), axis=0)
+        )
+        gv[:, :, :] = grid[0, :, :, :2]
+        self.gm[:, :, :] = np.expand_dims(grid[0, :, :, 2], axis=2)
 
     def _unload(self, root_dir: str, *names):
         entries = len(self.__dict__[names[0]])
