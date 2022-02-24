@@ -16,6 +16,7 @@ def offline_sim(
     model: str = typer.Option("jelly"),
     steps: int = typer.Option(4000),
     use_ml: bool = typer.Option(False),
+    gravity: int = typer.Option(-100),
 ):
     bounds = (0.4, 0.6)
     shape_res = 25
@@ -27,11 +28,7 @@ def offline_sim(
     x = np.concatenate((c1, c2))
     e = Engine(outdir, use_ml=use_ml)
     e.simulate(
-        x,
-        use_gui=use_gui,
-        model=model,
-        boundary_ops="slip",
-        steps=steps,
+        x, use_gui=use_gui, model=model, boundary_ops="slip", steps=steps, gravity=gravity
     )
 
 
@@ -59,7 +56,7 @@ def gen_data(
 
 @app.command()
 def train():
-    save_model(train_model(make_model(dropout=0.3)))
+    save_model(train_model(make_model(expo=4, dropout=0.3)))
 
 
 if __name__ == "__main__":

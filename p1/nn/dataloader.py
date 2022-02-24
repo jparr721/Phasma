@@ -13,6 +13,7 @@ class InputOutputGroup(object):
     x: np.ndarray
     y: np.ndarray
 
+
 @dataclass(frozen=True)
 class Dataset(object):
     # Input
@@ -24,8 +25,21 @@ class Dataset(object):
 
 def load_model_result(timestep_folder_path: str):
     files = list(os.listdir(timestep_folder_path))
-    x = np.load(os.path.join(timestep_folder_path, files[files.index("igbc.npy")]))
+    x = np.load(os.path.join(timestep_folder_path, files[files.index("igs.npy")]))
     y = np.load(os.path.join(timestep_folder_path, files[files.index("gbc.npy")]))
+
+    xv = x[:, :, 0]
+    yv = x[:, :, 1]
+    mask = (xv != 0) | (yv != 0)
+
+    x = np.stack((xv, yv, mask))
+
+    xv = y[:, :, 0]
+    yv = y[:, :, 1]
+    mask = (xv != 0) | (yv != 0)
+
+    y = np.stack((xv, yv, mask))
+
     return InputOutputGroup(x, y)
 
 
@@ -89,5 +103,3 @@ def load_datasets(datasets_path: str) -> List[str]:
             pickle.dump(load_model_results(folder), pf)
 
     return files
-
-

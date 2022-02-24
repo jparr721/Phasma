@@ -1,8 +1,10 @@
 import os
 from typing import Final, List, Tuple
 
+import matplotlib.pyplot as plt
 import numpy as np
 from loguru import logger
+from sklearn.preprocessing import MinMaxScaler
 from tensorflow.keras.models import Model, load_model
 from tqdm import tqdm
 
@@ -52,7 +54,7 @@ class Engine(object):
         model="jelly",
         boundary_ops="sticky",
         steps=2000,
-        gravity=-200.0,
+        gravity=-300.0,
         E=1e3,
         nu=0.2,
     ):
@@ -66,14 +68,15 @@ class Engine(object):
         mu_0: Final[float] = E / (2 * (1 + nu))
         lambda_0: Final[float] = E * nu / ((1 + nu) * (1 - 2 * nu))
 
-        xv = [self.x.copy()]
+        xv = []
         self.igs = []
         self.gs = []
         self.igbc = []
         self.gbc = []
 
+        self.current_step = 0
         try:
-            for _ in tqdm(range(steps), postfix={"model": model}):
+            for self.current_step in tqdm(range(steps), postfix={"model": model}):
                 self.gm = np.zeros((self.grid_res, self.grid_res, 1))
                 self.gv = np.zeros((self.grid_res, self.grid_res, 2))
 
@@ -95,16 +98,16 @@ class Engine(object):
                     model,
                 )
 
-                self.igs.append(np.concatenate((self.gv, self.gm), axis=2))
-                self.grid_op(self.dx, self.dt, gravity, self.gv, self.gm)
-                self.gs.append(np.concatenate((self.gv, self.gm), axis=2))
+                if not self.use_ml:
+                    self.igs.append(self.gv.copy())
+                    self.grid_op(self.dx, self.dt, gravity, self.gv, self.gm)
+                    self.gs.append(self.gv.copy())
 
-                self.igbc.append(np.concatenate((self.gv, self.gm), axis=2))
-                if self.use_ml:
+                    self.igbc.append(self.gv.copy())
                     self.apply_boundary_conditions(self.gv, boundary_ops)
+                    self.gbc.append(self.gv.copy())
                 else:
-                    self.ml_boundary_conditions(self.gv)
-                self.gbc.append(np.concatenate((self.gv, self.gm), axis=2))
+                    self.ml_grid_boundary(self.gv)
 
                 self.g2p(
                     self.inv_dx,
@@ -122,7 +125,6 @@ class Engine(object):
                     xv.append(self.x.copy())
         except Exception as e:
             logger.error(f"Sim crashed: {e}")
-            raise e
 
         if use_gui:
             import taichi as ti
@@ -140,6 +142,12 @@ class Engine(object):
                     )
                     gui.circles(xv[i], radius=1.5, color=0xED553B)
                     gui.show()
+                    # if not os.path.exists("pics"):
+                    #     os.mkdir("pics")
+                    #     os.mkdir("pics/x/")
+                    #     os.mkdir("pics/y/")
+                    # plt.imsave(f"pics/x/x{i}.png", self.gbc[i][:, :, 0])
+                    # plt.imsave(f"pics/y/y{i}.png", self.gbc[i][:, :, 1])
 
     def generate(
         self,
@@ -151,7 +159,7 @@ class Engine(object):
         incr: int,
     ):
         # Hardcoded for now to avoid annihilating our hdd
-        saved: Final[List[str]] = ["igs", "gs", "igbc", "gbc"]
+        saved: Final[List[str]] = ["igs", "gbc"]
 
         if not os.path.exists(self.outdir):
             os.mkdir(self.outdir)
@@ -159,23 +167,35 @@ class Engine(object):
             raise RuntimeError("Remove the datasets directory to continue")
 
         for gravity in tqdm(range(gmax, gmin, incr)):
-            data_dir = os.path.join(self.outdir, f"{model}_{gravity * -1}")
+            data_dir = os.path.join(self.outdir, f"{model}_{gravity}")
 
             if not os.path.exists(data_dir):
                 os.mkdir(data_dir)
             else:
                 raise RuntimeError(f"Dirname {data_dir} already exists")
 
-            self.simulate(x, use_gui=False, model=model, steps=steps, gravity=gravity)
+            self.simulate(
+                x.copy(), use_gui=False, model=model, steps=steps, gravity=gravity
+            )
             self._unload(data_dir, *saved)
 
-    def ml_boundary_conditions(self, gv: np.ndarray):
+    def ml_grid_boundary(self, gv: np.ndarray):
         assert self.use_ml
-        grid = self.ml_model.predict(
-            np.expand_dims(np.concatenate((gv, self.gm), axis=2), axis=0)
+        mask = (gv[:, :, 0] != 0) | (gv[:, :, 1] != 0)
+        model_input = np.concatenate((gv, np.expand_dims(mask, axis=2)), axis=2)
+        grid = np.squeeze(self.ml_model.predict(np.expand_dims(model_input, axis=0)))
+        gv[:, :, :2] = np.concatenate(
+            (
+                np.expand_dims(grid[:, :, 0], axis=2),
+                np.expand_dims(grid[:, :, 1], axis=2),
+            ),
+            axis=2,
         )
-        gv[:, :, :] = grid[0, :, :, :2]
-        self.gm[:, :, :] = np.expand_dims(grid[0, :, :, 2], axis=2)
+        mask = grid[:, :, 2]
+        if os.path.exists("pics"):
+            plt.imsave(f"pics/mask_{self.current_step}.png", mask)
+            plt.imsave(f"pics/mask_{self.current_step}.png", grid[:, :, 0])
+            plt.imsave(f"pics/mask_{self.current_step}.png", grid[:, :, 1])
 
     def _unload(self, root_dir: str, *names):
         entries = len(self.__dict__[names[0]])

@@ -3,23 +3,25 @@ import threading
 from time import sleep
 from typing import Dict, List
 
+import matplotlib.pyplot as plt
 import numpy as np
 import tensorflow as tf
 from loguru import logger
-from sklearn.preprocessing import MinMaxScaler
+from sklearn.preprocessing import StandardScaler
 from tensorflow.keras import Input, Model, Sequential
 from tensorflow.keras import layers as L
-from tensorflow.keras.callbacks import EarlyStopping
+from tensorflow.keras.callbacks import EarlyStopping, History
 from tensorflow.keras.initializers import RandomNormal
 from tensorflow.keras.optimizers import Adam
 
-from nn.dataloader import (Dataset, InputOutputGroup, load_datasets,
-                           load_pickle_files)
+from nn.dataloader import Dataset, InputOutputGroup, load_datasets, load_pickle_files
 
 _MODEL_OUTPUT_PATH = "cnn_model.h5"
-_BATCH_SIZE = 128
-_EPOCHS = 200
+_BATCH_SIZE = 20
+_EPOCHS = 50
 _LR = 0.001
+_LOSS = "mae"
+_CHANNELS = 3
 
 
 def make_dataset(datasets: Dict[str, List[InputOutputGroup]]) -> Dataset:
@@ -29,7 +31,7 @@ def make_dataset(datasets: Dict[str, List[InputOutputGroup]]) -> Dataset:
     )
 
 
-def make_model(*, input_shape=(64, 64, 3), expo=6, dropout=0.0):
+def make_model(*, input_shape=(64, 64, _CHANNELS), expo=6, dropout=0.0):
     def conv_block(
         name, filters, kernel_size=4, pad="same", t=False, act="relu", bn=True
     ):
@@ -75,7 +77,7 @@ def make_model(*, input_shape=(64, 64, 3), expo=6, dropout=0.0):
     e0 = Sequential(name="enc_0")
     e0.add(
         L.Conv2D(
-            filters=3,
+            filters=_CHANNELS,
             kernel_size=4,
             strides=(2, 2),
             padding="same",
@@ -96,7 +98,7 @@ def make_model(*, input_shape=(64, 64, 3), expo=6, dropout=0.0):
     dec_1 = conv_block("dec_1", channels, act=None, t=True, bn=False)
     dec_0 = Sequential(name="dec_0")
     dec_0.add(L.ReLU())
-    dec_0.add(L.Conv2DTranspose(3, kernel_size=4, strides=(2, 2), padding="same"))
+    dec_0.add(L.Conv2DTranspose(_CHANNELS, kernel_size=4, strides=(2, 2), padding="same"))
 
     # Forward Pass
     inputs = Input(shape=input_shape)
@@ -120,7 +122,8 @@ def make_model(*, input_shape=(64, 64, 3), expo=6, dropout=0.0):
     dout0 = dec_0(dout1_out0)
 
     model = Model(inputs=inputs, outputs=dout0)
-    model.compile(optimizer=Adam(_LR, beta_1=0.5), loss="mse")
+    model.compile(optimizer=Adam(_LR, beta_1=0.5), loss=_LOSS)
+    print(model.summary())
     return model
 
 
@@ -133,7 +136,7 @@ def poll_ram():
                 os.popen("free --giga --total | awk '/^Total:/ {print $3}'").read()
             )
 
-            if used > 30:
+            if used > 31:
                 logger.error("Memory limit reached, killing process")
                 logger.warning("Memory will not be cleaned up, I suggest a reboot")
                 os._exit(1)
@@ -141,8 +144,8 @@ def poll_ram():
             logger.error(f"Error getting memory reading! This is dangerous! {e}")
 
 
-def train_model(model):
-    # threading.Thread(target=poll_ram, daemon=True).start()
+def train_model(model: Model, show_plots=False):
+    threading.Thread(target=poll_ram, daemon=True).start()
     base = os.path.join(os.path.abspath(os.path.dirname(__file__)), "..", "datasets")
 
     # Check if we have cached data
@@ -155,29 +158,26 @@ def train_model(model):
         )
         pkl_files = load_datasets(base)
 
-    x_scaler = MinMaxScaler()
-    y_scaler = MinMaxScaler()
+    x_scaler = StandardScaler()
     while len(pkl_files) > 0:
         loaded, pkl_files = load_pickle_files(pkl_files, 5)
         dataset = make_dataset(loaded)
 
         logger.success("Dataset loaded")
 
-        x = x_scaler.fit_transform(dataset.x.reshape(-1, dataset.x.shape[-1])).reshape(
-            dataset.x.shape
-        )
-
-        # y = y_scaler.fit_transform(dataset.y.reshape(-1, dataset.y.shape[-1])).reshape(
-        #     dataset.y.shape
+        # x = x_scaler.fit_transform(dataset.x.reshape(-1, dataset.x.shape[-1])).reshape(
+        #     dataset.x.shape
         # )
+        x = np.moveaxis(dataset.x, 1, -1)
+        y = np.moveaxis(dataset.y, 1, -1)
 
         logger.info(f"x.shape {x.shape}")
-        logger.info(f"y.shape {dataset.y.shape}")
+        logger.info(f"y.shape {y.shape}")
 
         try:
-            model.fit(
+            history = model.fit(
                 x,
-                dataset.y,
+                y,
                 epochs=_EPOCHS,
                 batch_size=_BATCH_SIZE,
                 validation_split=0.3,
@@ -185,16 +185,33 @@ def train_model(model):
                     EarlyStopping(monitor="loss", patience=5, restore_best_weights=True)
                 ],
             )
-        except KeyboardInterrupt:
-            logger.warning("Killed. Saving state if possible.")
+            if show_plots:
+                plot(history)
+        except Exception as e:
+            raise e
 
         # Free memory after training cycle
         del dataset
         del loaded
 
-        # logger.success("Saving Scalers")
-
     return model
+
+
+def plot(history: History):
+    logger.info("Plotting")
+    history_dict = history.history
+    loss_values = history_dict["loss"]
+    val_loss_values = history_dict["val_loss"]
+
+    epochs = range(1, len(loss_values) + 1)
+    plt.plot(epochs, loss_values, "bo", label="Training loss")
+    plt.plot(epochs, val_loss_values, "b", label="Validation loss")
+    plt.title("Training & Validation Loss", fontsize=16)
+    plt.xlabel("Epochs", fontsize=16)
+    plt.ylabel("Loss", fontsize=16)
+    plt.legend()
+
+    plt.show()
 
 
 def save_model(model):
