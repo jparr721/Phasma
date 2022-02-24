@@ -191,11 +191,11 @@ class Engine(object):
             ),
             axis=2,
         )
-        mask = grid[:, :, 2]
-        if os.path.exists("pics"):
-            plt.imsave(f"pics/mask_{self.current_step}.png", mask)
-            plt.imsave(f"pics/mask_{self.current_step}.png", grid[:, :, 0])
-            plt.imsave(f"pics/mask_{self.current_step}.png", grid[:, :, 1])
+        # mask = grid[:, :, 2]
+        # if os.path.exists("pics"):
+        #     plt.imsave(f"pics/mask/mask_{self.current_step}.png", mask)
+        #     plt.imsave(f"pics/x/x_{self.current_step}.png", grid[:, :, 0])
+        #     plt.imsave(f"pics/y/y_{self.current_step}.png", grid[:, :, 1])
 
     def _unload(self, root_dir: str, *names):
         entries = len(self.__dict__[names[0]])
