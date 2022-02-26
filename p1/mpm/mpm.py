@@ -2,7 +2,6 @@ from typing import Final
 
 import numba as nb
 import numpy as np
-from tensorflow.keras.models import Model
 
 from .utils import *
 
@@ -129,10 +128,11 @@ def grid_op(dx: float, dt: float, gravity: float, gv: np.ndarray, gm: np.ndarray
     collision scenarios.
 
     Args:
+        dx (float): dx
         dt (float): dt
         gravity (float): gravity
-        grid_velocity (np.ndarray): grid_velocity
-        grid_mass (np.ndarray): grid_mass
+        gv (np.ndarray): grid velocity
+        gm (np.ndarray): grid mass
     """
     v_allowed: Final[float] = dx * 0.9 / dt
     for i in range(gv.shape[0]):
@@ -194,24 +194,3 @@ def apply_boundary_conditions(gv: np.ndarray, axis_op="sticky", lower_boundary=3
         separate_slip()
     else:
         raise ValueError
-
-
-def nn_grid_op(
-    dx: float,
-    dt: float,
-    gravity: float,
-    model: Model,
-    gv: np.ndarray,
-    gm: np.ndarray,
-):
-
-    v_allowed: Final[float] = dx * 0.9 / dt
-    for i in range(gv.shape[0]):
-        for j in range(gv.shape[1]):
-            if gm[i, j][0] > 0:
-                gv[i, j] /= gm[i, j][0]
-                gv[i, j][1] += dt * gravity
-                gv[i, j] = np.clip(gv[i, j], -v_allowed, v_allowed)
-    grid = model.predict(np.expand_dims(np.concatenate((gv, gm), axis=2), axis=0))
-    gv[:, :, :] = grid[0, :, :, :2]
-    gm[:, :, :] = np.expand_dims(grid[0, :, :, 2], axis=2)

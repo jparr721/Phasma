@@ -4,3 +4,4 @@ tmp/
 datasets/
 *.pickle
 *.pkl
+pics/
