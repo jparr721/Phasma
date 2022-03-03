@@ -2,6 +2,7 @@ from typing import Final
 
 import numba as nb
 import numpy as np
+from matplotlib.pyplot import axis
 
 from .utils import *
 
