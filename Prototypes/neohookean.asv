@@ -1,0 +1,11 @@
+F = sym('F', [3, 3]);
+assume(F, 'real');
+J = det(F);
+F_norm = norm(F);
+syms mu;
+syms lambda;
+log_J = log(J);
+
+psi = mu/2 * (norm(F) - 3) - mu * log_J + lambda/2 * (log_J)^2;
+
+diff(norm(F) -)
